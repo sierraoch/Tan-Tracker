@@ -385,9 +385,14 @@ function isShadowedByBuilding(spotLat, spotLon, bldg, sunAltDeg, sunBearingDeg) 
 // Analyze how many consecutive hours a spot gets unobstructed sun today (8am-7pm)
 function analyzeSunWindow(spot) {
   const SunCalc = window.SunCalc;
-  if (!SunCalc) return { sunHours: 99, sunWindow: 'All day' }; // CDN failed → pass through
+  if (!SunCalc) return { sunHours: 8, sunWindow: 'All day' }; // CDN failed → pass through
 
   const buildings = getNearbyBuildings(spot.lat, spot.lon);
+
+  // Zero buildings = open area (beach, field, plaza) — nothing can block sun → top tier
+  if (buildings.length === 0) {
+    return { sunHours: 8, sunWindow: 'All day' };
+  }
   const today = new Date();
   today.setHours(0, 0, 0, 0);
 
@@ -424,7 +429,10 @@ function addParkMarker(spot, userLat, userLon) {
   const size = spot.sunHours >= 4 ? 'large' : spot.sunHours >= 3 ? 'medium' : 'small';
   el.className = `park-bubble park-bubble--${size}`;
 
-  const icon  = spot.category === 'park' ? '🌳' : spot.category === 'restaurant' ? '🍽️' : '☀️';
+  const icon  = spot.category === 'park' ? '🌳'
+              : spot.category === 'restaurant' ? '🍽️'
+              : spot.category === 'beach' ? '🏖️'
+              : '☀️';
   const dist  = haversine(userLat, userLon, spot.lat, spot.lon);
   const name  = spot.name.split(',')[0];
 

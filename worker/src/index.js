@@ -85,6 +85,7 @@ export default {
           { q: 'park',               category: 'park'       },
           { q: 'outdoor+restaurant', category: 'restaurant' },
           { q: 'plaza',              category: 'plaza'      },
+          { q: 'beach',              category: 'beach'      },
         ];
 
         const groups = await Promise.all(
