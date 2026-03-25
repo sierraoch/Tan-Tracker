@@ -31,8 +31,10 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Deploy to Cloudflare Pages
-        uses: cloudflare/wrangler-action@v3
+        uses: cloudflare/pages-action@v1
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: 44c7119ef8a889e8c8aa739b1c84de28
-          command: pages deploy frontend --project-name=tan-tracker --commit-dirty=true
+          projectName: tan-tracker
+          directory: frontend
+          gitHubToken: ${{ secrets.GITHUB_TOKEN }}
