@@ -1,4 +1,4 @@
-import { fetchUV, geocode } from './api.js';
+import { fetchUV, fetchParks, geocode } from './api.js';
 import { uvDescription } from './tanScore.js';
 
 // ── Sun position ──────────────────────────────────────────────────────────
@@ -48,10 +48,12 @@ export async function initMapPage(lat, lon, mapboxToken) {
     addSkyLayer(new Date(), lat, lon);
     setSunLighting(new Date(), lat, lon);
     loadUV(lat, lon);
+    loadParks(lat, lon);
   });
 
   initScrubber(lat, lon);
   initSearch();
+  initLocateButton();
 }
 
 export function refreshMapLocation(lat, lon) {
@@ -65,6 +67,8 @@ export function refreshMapLocation(lat, lon) {
     updateOpenAreaBrightness(new Date(), lat);
   }
   loadUV(lat, lon);
+  clearParks();
+  loadParks(lat, lon);
 }
 
 // ── 3D buildings with shadow casting ─────────────────────────────────────
@@ -217,23 +221,166 @@ function formatTime(totalMinutes) {
   return `${h % 12 || 12}:${m.toString().padStart(2, '0')} ${h < 12 ? 'AM' : 'PM'}`;
 }
 
-// ── UV ────────────────────────────────────────────────────────────────────
+// ── UV + Weather bar ──────────────────────────────────────────────────────
 async function loadUV(lat, lon) {
-  const badge   = document.getElementById('uv-badge');
-  const valueEl = document.getElementById('uv-value');
-  const labelEl = document.getElementById('uv-label');
   try {
     const data = await fetchUV(lat, lon);
     const uv = data.uvIndex ?? 0;
     const { level, text } = uvDescription(uv);
-    valueEl.textContent = `UV ${uv.toFixed(1)}`;
-    labelEl.textContent = text;
-    badge.setAttribute('data-level', level);
+    const displayText = data.isNight ? 'Nighttime' : text;
+
+    // Legacy badge (keep in sync)
+    const valueEl = document.getElementById('uv-value');
+    const labelEl = document.getElementById('uv-label');
+    const badge   = document.getElementById('uv-badge');
+    if (valueEl) valueEl.textContent = `UV ${uv.toFixed(1)}`;
+    if (labelEl) labelEl.textContent = displayText;
+    if (badge)   badge.setAttribute('data-level', level);
     window.__currentUV__ = uv;
-  } catch {
-    valueEl.textContent = 'UV --';
-    labelEl.textContent = 'Unavailable';
+
+    // Weather bar
+    updateWeatherBar(data, uv, level, displayText);
+  } catch (e) {
+    console.error('[UV] fetch error:', e);
+    const el = document.getElementById('bar-uv-num');
+    if (el) el.textContent = '--';
   }
+}
+
+function wmoToEmoji(code) {
+  if (code === 0)                       return '☀️';
+  if ([1, 2, 3].includes(code))         return '⛅';
+  if ([45, 48].includes(code))          return '🌫️';
+  if ([51, 53, 55].includes(code))      return '🌦️';
+  if ([61, 63, 65].includes(code))      return '🌧️';
+  if ([71, 73, 75].includes(code))      return '🌨️';
+  if (code === 77)                      return '🌨️';
+  if ([80, 81, 82].includes(code))      return '🌦️';
+  if ([85, 86].includes(code))          return '🌨️';
+  if (code === 95)                      return '⛈️';
+  if ([96, 99].includes(code))          return '⛈️';
+  return '🌡️';
+}
+
+// Map UV level name → CSS color var
+const UV_COLORS = {
+  low:       'var(--uv-green)',
+  moderate:  'var(--uv-yellow)',
+  high:      'var(--uv-orange)',
+  'very-high': 'var(--uv-red)',
+  extreme:   'var(--uv-purple)',
+};
+
+function updateWeatherBar(data, uv, level, displayText) {
+  const numEl   = document.getElementById('bar-uv-num');
+  const lblEl   = document.getElementById('bar-uv-label');
+  const iconEl  = document.getElementById('bar-wx-icon');
+  const tempEl  = document.getElementById('bar-wx-temp');
+
+  if (numEl) {
+    numEl.textContent = uv === 0 ? '0' : uv.toFixed(1);
+    numEl.style.color = UV_COLORS[level] ?? 'inherit';
+  }
+  if (lblEl) lblEl.textContent = displayText;
+
+  if (iconEl && data.weathercode != null) {
+    iconEl.textContent = wmoToEmoji(data.weathercode);
+  }
+  if (tempEl && data.tempF != null) {
+    tempEl.textContent = `${data.tempF}°F`;
+  }
+
+  // Mini forecast bars (+1h, +2h, +3h)
+  const maxUV = 12;
+  (data.forecast ?? []).forEach((uvH, i) => {
+    const col  = document.getElementById(`bar-f${i + 1}`);
+    if (!col) return;
+    const fill = col.querySelector('.forecast-bar-fill');
+    const pct  = Math.min(100, (uvH / maxUV) * 100);
+    const { level: fLevel } = uvDescription(uvH);
+    if (fill) {
+      fill.style.height = `${Math.max(4, pct)}%`;
+      fill.style.background = UV_COLORS[fLevel] ?? 'var(--amber-light)';
+    }
+  });
+}
+
+// ── Park bubble markers ───────────────────────────────────────────────────
+const parkMarkers = [];
+
+function haversine(lat1, lon1, lat2, lon2) {
+  const R = 3958.8;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a = Math.sin(dLat / 2) ** 2
+    + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180)
+    * Math.sin(dLon / 2) ** 2;
+  return (R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))).toFixed(1);
+}
+
+function clearParks() {
+  parkMarkers.forEach(m => m.remove());
+  parkMarkers.length = 0;
+}
+
+async function loadParks(lat, lon) {
+  try {
+    const data = await fetchParks(lat, lon);
+    console.log('[parks] received', data.parks?.length ?? 0, 'results');
+    (data.parks ?? []).forEach(park => {
+      const el = document.createElement('div');
+      el.className = 'park-bubble';
+
+      const dist = haversine(lat, lon, park.lat, park.lon);
+      const shortName = park.name.split(',')[0];
+      const popup = new mapboxgl.Popup({ offset: 14, closeButton: false })
+        .setHTML(`<strong>${shortName}</strong><br><span>${dist} mi away</span>`);
+
+      const marker = new mapboxgl.Marker({ element: el })
+        .setLngLat([park.lon, park.lat])
+        .setPopup(popup)
+        .addTo(map);
+
+      el.addEventListener('click', () => marker.togglePopup());
+      parkMarkers.push(marker);
+    });
+  } catch (e) {
+    console.error('[parks] error:', e);
+  }
+}
+
+// ── Locate button (iOS-safe: synchronous inside direct click handler) ──────
+function initLocateButton() {
+  const btn = document.getElementById('locate-btn');
+  if (!btn) return;
+
+  btn.addEventListener('click', function() {
+    if (!navigator.geolocation) {
+      alert('Geolocation not supported on this device');
+      return;
+    }
+    btn.classList.add('locating');
+    navigator.geolocation.getCurrentPosition(
+      function(position) {
+        const lat = position.coords.latitude;
+        const lon = position.coords.longitude;
+        console.log('Got location:', lat, lon);
+        btn.classList.remove('locating');
+        saveGPSLocation(lat, lon);
+        currentLat = lat; currentLon = lon;
+        if (map) map.flyTo({ center: [lon, lat], zoom: 15, duration: 1200, essential: true });
+        loadUV(lat, lon);
+        clearParks();
+        loadParks(lat, lon);
+      },
+      function(error) {
+        console.error('Location error code:', error.code, 'message:', error.message);
+        btn.classList.remove('locating');
+        alert('Location error: ' + error.message);
+      },
+      { enableHighAccuracy: false, timeout: 10000, maximumAge: 0 }
+    );
+  });
 }
 
 // ── City / zip search ─────────────────────────────────────────────────────

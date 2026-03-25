@@ -1080,3 +1080,115 @@ input { font-family: inherit; }
   font-family: var(--font-sans);
   box-shadow: var(--shadow-md);
 }
+.mapboxgl-popup-content strong { color: var(--text); font-size: 0.88rem; }
+.mapboxgl-popup-content span   { color: var(--text-3); font-size: 0.78rem; }
+
+/* ── Locate button (inside search bar) ─────────────────────────────────── */
+.locate-btn {
+  flex-shrink: 0;
+  color: var(--amber);
+  padding: 4px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  transition: opacity 0.15s;
+}
+.locate-btn:active { opacity: 0.6; }
+.locate-btn.locating { opacity: 0.4; animation: pulse-sun 1s infinite; }
+
+/* ── Weather bar ─────────────────────────────────────────────────────────── */
+.weather-bar {
+  position: absolute;
+  top: 116px;
+  left: 16px;
+  right: 16px;
+  z-index: 9;
+  background: rgba(255,255,255,0.96);
+  backdrop-filter: blur(10px);
+  border-radius: 14px;
+  padding: 10px 16px;
+  display: flex;
+  align-items: center;
+  gap: 0;
+  box-shadow: var(--shadow-sm);
+}
+.weather-section {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  flex: 1;
+  gap: 2px;
+}
+.weather-divider {
+  width: 1px;
+  height: 32px;
+  background: var(--border);
+  flex-shrink: 0;
+}
+.bar-uv-num {
+  font-family: var(--font-serif);
+  font-size: 1.2rem;
+  line-height: 1;
+  color: var(--amber);
+}
+.bar-uv-label {
+  font-size: 0.68rem;
+  color: var(--text-3);
+  font-weight: 500;
+  text-align: center;
+  line-height: 1.2;
+}
+.wx-section { gap: 1px; }
+.bar-wx-icon { font-size: 1.2rem; line-height: 1; }
+.bar-wx-temp { font-size: 0.75rem; color: var(--text-2); font-weight: 500; }
+
+/* Forecast mini bars */
+.forecast-section {
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 6px;
+  flex: 1;
+  padding: 0 4px;
+}
+.forecast-col {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  width: 22px;
+}
+.forecast-col span {
+  font-size: 0.58rem;
+  color: var(--text-3);
+  font-weight: 500;
+  white-space: nowrap;
+}
+.forecast-track {
+  width: 16px;
+  height: 28px;
+  background: var(--cream-3);
+  border-radius: 4px;
+  display: flex;
+  align-items: flex-end;
+  overflow: hidden;
+}
+.forecast-bar-fill {
+  width: 100%;
+  min-height: 3px;
+  border-radius: 4px 4px 0 0;
+  background: var(--amber-light);
+  transition: height 0.4s ease, background 0.3s;
+}
+
+/* ── Park bubble markers ────────────────────────────────────────────────── */
+.park-bubble {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #C8822A;
+  box-shadow: 0 0 0 4px rgba(200,130,42,0.25), 0 2px 8px rgba(0,0,0,0.3);
+  cursor: pointer;
+  transition: transform 0.15s;
+}
+.park-bubble:active { transform: scale(1.2); }
