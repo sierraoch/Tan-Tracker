@@ -325,92 +325,25 @@ function haversine(lat1, lon1, lat2, lon2) {
   return (R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))).toFixed(1);
 }
 
-// Compass bearing (degrees, north = 0, clockwise) from point 1 → point 2
-function bearing(lat1, lon1, lat2, lon2) {
-  const dLon = (lon2 - lon1) * Math.PI / 180;
-  const lat1R = lat1 * Math.PI / 180;
-  const lat2R = lat2 * Math.PI / 180;
-  const y = Math.sin(dLon) * Math.cos(lat2R);
-  const x = Math.cos(lat1R) * Math.sin(lat2R) - Math.sin(lat1R) * Math.cos(lat2R) * Math.cos(dLon);
-  return ((Math.atan2(y, x) * 180 / Math.PI) + 360) % 360;
-}
-
-function distMeters(lat1, lon1, lat2, lon2) {
-  const R = 6371000;
-  const dLat = (lat2 - lat1) * Math.PI / 180;
-  const dLon = (lon2 - lon1) * Math.PI / 180;
-  const a = Math.sin(dLat / 2) ** 2
-    + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180)
-    * Math.sin(dLon / 2) ** 2;
-  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-}
-
-// Query rendered 3D buildings near a spot and return simplified objects
-function getNearbyBuildings(spotLat, spotLon) {
-  if (!map || !map.getLayer('3d-buildings')) return [];
-  try {
-    const pt = map.project([spotLon, spotLat]);
-    const features = map.queryRenderedFeatures(
-      [[pt.x - 150, pt.y - 150], [pt.x + 150, pt.y + 150]],
-      { layers: ['3d-buildings'] }
-    );
-    return features.map(f => {
-      const coords = f.geometry.type === 'Polygon'
-        ? f.geometry.coordinates[0]
-        : f.geometry.coordinates[0][0];
-      const lons = coords.map(c => c[0]);
-      const lats = coords.map(c => c[1]);
-      return {
-        lat: (Math.min(...lats) + Math.max(...lats)) / 2,
-        lon: (Math.min(...lons) + Math.max(...lons)) / 2,
-        height: f.properties.height || f.properties.render_height || 10,
-      };
-    });
-  } catch { return []; }
-}
-
-// Returns true if a building casts shadow on the spot at the given sun position
-function isShadowedByBuilding(spotLat, spotLon, bldg, sunAltDeg, sunBearingDeg) {
-  if (sunAltDeg <= 0) return true;
-  const dist = distMeters(spotLat, spotLon, bldg.lat, bldg.lon);
-  if (dist < 2) return false;
-  // Sun is at sunBearingDeg; building must be in that direction to block sun
-  const bldgBearing = bearing(spotLat, spotLon, bldg.lat, bldg.lon);
-  const angDiff = Math.abs(((bldgBearing - sunBearingDeg + 540) % 360) - 180);
-  if (angDiff > 30) return false;
-  // Building tall enough to cast shadow at this sun altitude?
-  return bldg.height > dist * Math.tan(sunAltDeg * Math.PI / 180);
-}
-
-// Analyze how many consecutive hours a spot gets unobstructed sun today (8am-7pm)
+// Analyze consecutive hours of meaningful sun (altitude ≥ 15°) using SunCalc only.
+// No queryRenderedFeatures — building queries had too large a radius and falsely
+// shadowed open areas like beaches by picking up distant PCH / street buildings.
 function analyzeSunWindow(spot) {
   const SunCalc = window.SunCalc;
-  if (!SunCalc) return { sunHours: 8, sunWindow: 'All day' }; // CDN failed → pass through
+  if (!SunCalc) return { sunHours: 8, sunWindow: 'All day' };
 
-  const buildings = getNearbyBuildings(spot.lat, spot.lon);
-
-  // Zero buildings = open area (beach, field, plaza) — nothing can block sun → top tier
-  if (buildings.length === 0) {
-    return { sunHours: 8, sunWindow: 'All day' };
-  }
   const today = new Date();
   today.setHours(0, 0, 0, 0);
 
   const sunnyHours = [];
-  for (let h = 8; h <= 19; h++) {
+  for (let h = 7; h <= 19; h++) {
     const d = new Date(today);
     d.setHours(h, 0, 0, 0);
     const pos    = SunCalc.getPosition(d, spot.lat, spot.lon);
     const altDeg = pos.altitude * 180 / Math.PI;
-    if (altDeg <= 2) continue; // below horizon or nearly so
-
-    // SunCalc azimuth: from south, positive = west. Convert to compass (north = 0).
-    const sunBearing = ((pos.azimuth * 180 / Math.PI) + 180 + 360) % 360;
-    const shadowed = buildings.some(b => isShadowedByBuilding(spot.lat, spot.lon, b, altDeg, sunBearing));
-    if (!shadowed) sunnyHours.push(h);
+    if (altDeg >= 15) sunnyHours.push(h); // 15° = sun high enough for real tanning
   }
 
-  // Longest consecutive block
   let maxLen = 0, maxStart = -1, curLen = 0, curStart = -1;
   sunnyHours.forEach((h, i) => {
     if (i === 0 || h !== sunnyHours[i - 1] + 1) { curLen = 1; curStart = h; }
@@ -487,9 +420,7 @@ async function loadParks(lat, lon) {
     }
   };
 
-  // Always wait for idle so the new location's tiles are fully rendered
-  // before queryRenderedFeatures runs the shadow analysis
-  map.once('idle', doAnalysis);
+  doAnalysis(); // no tile dependency — SunCalc runs on coords alone
 }
 
 // ── Locate button (iOS-safe: synchronous inside direct click handler) ──────
