@@ -1,4 +1,4 @@
-const CACHE_NAME = 'tan-tracker-v1';
+const CACHE_NAME = 'tan-tracker-v2';
 
 // Assets to precache
 const PRECACHE = [

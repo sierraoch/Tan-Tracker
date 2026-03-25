@@ -851,32 +851,63 @@ input { font-family: inherit; }
   margin-top: -1px;
 }
 
-/* ── Location denied banner ─────────────────────────────────────────────── */
-.location-banner {
+/* ── Location Prompt ─────────────────────────────────────────────────────── */
+.location-prompt {
   position: absolute;
-  bottom: 80px;
-  left: 16px;
-  right: 16px;
-  z-index: 10;
-  background: rgba(255,255,255,0.95);
-  border-radius: 12px;
-  padding: 10px 14px;
+  inset: 0;
+  z-index: 20;
+  background: var(--cream);
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  font-size: 0.8rem;
-  color: var(--text-2);
-  box-shadow: var(--shadow-md);
+  justify-content: center;
+  padding: 32px 28px;
 }
-.location-banner button {
+.location-prompt-inner {
+  text-align: center;
+  max-width: 320px;
+}
+.location-prompt-icon {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background: var(--amber-pale);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto 20px;
+  color: var(--amber);
+}
+.location-prompt h2 {
+  font-family: var(--font-serif);
+  font-size: 1.8rem;
+  color: var(--text);
+  margin-bottom: 10px;
+}
+.location-prompt p {
+  font-size: 0.9rem;
+  color: var(--text-3);
+  line-height: 1.5;
+  margin-bottom: 28px;
+}
+#location-allow-btn {
+  display: block;
+  width: 100%;
   background: var(--amber);
   color: white;
-  border-radius: 8px;
-  padding: 6px 12px;
-  font-size: 0.78rem;
+  border-radius: 14px;
+  padding: 15px;
+  font-size: 0.95rem;
   font-weight: 600;
-  white-space: nowrap;
+  margin-bottom: 12px;
+  box-shadow: 0 4px 14px rgba(212,131,58,0.35);
+}
+#location-skip-btn {
+  display: block;
+  width: 100%;
+  background: none;
+  color: var(--text-3);
+  font-size: 0.85rem;
+  padding: 8px;
 }
 
 /* ── Mapbox overrides ────────────────────────────────────────────────────── */

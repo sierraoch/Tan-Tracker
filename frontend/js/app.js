@@ -4,8 +4,8 @@ import { initMapPage, refreshMapLocation } from './map.js';
 import { initMyTanPage } from './mytan.js';
 
 let MAPBOX_TOKEN = '';
-let userLat = 40.7580;  // Default: Times Square, NYC
-let userLon = -73.9855;
+let userLat = null;
+let userLon = null;
 let mapInitialized = false;
 let profile = null;
 
@@ -14,7 +14,6 @@ async function boot() {
     navigator.serviceWorker.register('/sw.js').catch(() => {});
   }
 
-  // Fetch config token — location is requested fresh each map visit
   const configResult = await fetchConfig().catch(() => null);
   MAPBOX_TOKEN = configResult?.mapboxToken ?? '';
 
@@ -27,33 +26,35 @@ async function boot() {
   }
 
   const loading = document.getElementById('loading');
+  loading.classList.add('fade-out');
+  setTimeout(() => loading.classList.add('hidden'), 400);
 
-  if (!existingProfile || !existingProfile.fitzpatrickType) {
-    loading.classList.add('fade-out');
-    setTimeout(() => loading.classList.add('hidden'), 400);
+  if (!existingProfile?.fitzpatrickType) {
     startOnboarding(document.getElementById('onboarding'), (newProfile) => {
       profile = newProfile;
       showApp();
     });
   } else {
     profile = existingProfile;
-    loading.classList.add('fade-out');
-    setTimeout(() => { loading.classList.add('hidden'); showApp(); }, 400);
+    showApp();
   }
 }
 
-// Always get fresh location — no cache
-export function getLocation() {
+// Explicit location request — called fresh each time map is shown
+export function requestLocation() {
   return new Promise(resolve => {
-    if (!navigator.geolocation) { resolve({ lat: userLat, lon: userLon, denied: false }); return; }
+    if (!navigator.geolocation) {
+      resolve({ lat: 40.758, lon: -73.985, denied: true });
+      return;
+    }
     navigator.geolocation.getCurrentPosition(
       pos => {
         userLat = pos.coords.latitude;
         userLon = pos.coords.longitude;
         resolve({ lat: userLat, lon: userLon, denied: false });
       },
-      () => resolve({ lat: userLat, lon: userLon, denied: true }),
-      { timeout: 8000, maximumAge: 0 }  // always fresh, no cache
+      () => resolve({ lat: userLat ?? 40.758, lon: userLon ?? -73.985, denied: true }),
+      { timeout: 8000, maximumAge: 0 }
     );
   });
 }
@@ -76,18 +77,21 @@ async function navigateTo(pageName) {
   });
 
   if (pageName === 'map') {
+    // Always request fresh location when opening map
+    const loc = await requestLocation();
+
+    if (loc.denied && userLat === null) {
+      // First time + denied — show location prompt overlay
+      showLocationPrompt();
+      return;
+    }
+
     if (!mapInitialized) {
       mapInitialized = true;
-      // Get location fresh, then init map
-      const loc = await getLocation();
-      userLat = loc.lat; userLon = loc.lon;
-      initMapPage(userLat, userLon, MAPBOX_TOKEN, loc.denied)
+      initMapPage(loc.lat, loc.lon, MAPBOX_TOKEN)
         .catch(e => console.error('Map init failed:', e));
     } else {
-      // Map already exists — just refresh location and re-center
-      const loc = await getLocation();
-      userLat = loc.lat; userLon = loc.lon;
-      refreshMapLocation(userLat, userLon, loc.denied);
+      refreshMapLocation(loc.lat, loc.lon);
     }
   }
 
@@ -95,6 +99,54 @@ async function navigateTo(pageName) {
     if (!mytanInitialized) mytanInitialized = true;
     initMyTanPage(profile).catch(() => {});
   }
+}
+
+function showLocationPrompt() {
+  const page = document.getElementById('page-map');
+  let prompt = document.getElementById('location-prompt');
+  if (prompt) return;
+
+  prompt = document.createElement('div');
+  prompt.id = 'location-prompt';
+  prompt.className = 'location-prompt';
+  prompt.innerHTML = `
+    <div class="location-prompt-inner">
+      <div class="location-prompt-icon">
+        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+          <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z"/>
+          <circle cx="12" cy="9" r="2.5"/>
+        </svg>
+      </div>
+      <h2>Where are you?</h2>
+      <p>Tan Tracker needs your location to show real-time sun and shadows on your map.</p>
+      <button id="location-allow-btn">Allow location</button>
+      <button id="location-skip-btn">Use New York City instead</button>
+    </div>
+  `;
+  page.appendChild(prompt);
+
+  document.getElementById('location-allow-btn').addEventListener('click', async () => {
+    prompt.remove();
+    const loc = await requestLocation();
+    if (!mapInitialized) {
+      mapInitialized = true;
+      initMapPage(loc.lat, loc.lon, MAPBOX_TOKEN);
+    } else {
+      refreshMapLocation(loc.lat, loc.lon);
+    }
+  });
+
+  document.getElementById('location-skip-btn').addEventListener('click', () => {
+    prompt.remove();
+    const lat = 40.758, lon = -73.985;
+    userLat = lat; userLon = lon;
+    if (!mapInitialized) {
+      mapInitialized = true;
+      initMapPage(lat, lon, MAPBOX_TOKEN);
+    } else {
+      refreshMapLocation(lat, lon);
+    }
+  });
 }
 
 boot();
