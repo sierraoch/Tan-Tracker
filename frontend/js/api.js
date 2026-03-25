@@ -15,6 +15,11 @@ async function request(path, options = {}) {
   return res.json();
 }
 
+// ── Config ───────────────────────────────────────────────────────────────
+export async function fetchConfig() {
+  return request('/api/config');
+}
+
 // ── UV ───────────────────────────────────────────────────────────────────
 export async function fetchUV(lat, lon) {
   return request(`/api/uv?lat=${lat}&lon=${lon}`);

@@ -25,6 +25,13 @@ export default {
     const path = url.pathname;
 
     try {
+      // ── Config (serves public Mapbox token to frontend) ──────────────────
+      if (path === '/api/config' && request.method === 'GET') {
+        const token = env.MAPBOX_TOKEN;
+        if (!token) return err('Mapbox token not configured', 500);
+        return json({ mapboxToken: token });
+      }
+
       // ── UV Index (Open-Meteo, no key required) ──────────────────────────
       if (path === '/api/uv') {
         const lat = url.searchParams.get('lat');

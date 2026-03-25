@@ -1,12 +1,9 @@
-import { getProfile } from './api.js';
+import { getProfile, fetchConfig } from './api.js';
 import { startOnboarding } from './onboarding.js';
 import { initMapPage } from './map.js';
 import { initMyTanPage } from './mytan.js';
 
-// ── Mapbox token (injected at deploy time or set here for Pages) ──────────
-// This is the PUBLIC token — safe to be in frontend code.
-// Set this to your Mapbox public token (pk.eyJ1...) after creating an account.
-const MAPBOX_TOKEN = window.__MAPBOX_TOKEN__ || 'YOUR_MAPBOX_PUBLIC_TOKEN_HERE';
+let MAPBOX_TOKEN = '';
 
 let userLat = 40.7580;  // Default: Times Square, NYC
 let userLon = -73.9855;
@@ -19,8 +16,14 @@ async function boot() {
     navigator.serviceWorker.register('/sw.js').catch(e => console.warn('SW reg failed:', e));
   }
 
-  // Get GPS location
-  await getLocation();
+  // Fetch config (Mapbox token) and GPS in parallel
+  const [, configResult] = await Promise.allSettled([
+    getLocation(),
+    fetchConfig(),
+  ]);
+  if (configResult.status === 'fulfilled') {
+    MAPBOX_TOKEN = configResult.value?.mapboxToken ?? '';
+  }
 
   // Check for existing profile
   let existingProfile = null;
