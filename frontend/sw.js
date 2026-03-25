@@ -1,4 +1,4 @@
-const CACHE_NAME = 'tan-tracker-v5';
+const CACHE_NAME = 'tan-tracker-v6';
 
 self.addEventListener('install', event => {
   // Don't precache — always fetch fresh app shell from network
