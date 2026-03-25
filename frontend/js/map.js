@@ -479,12 +479,9 @@ async function loadParks(lat, lon) {
     }
   };
 
-  // If map is already idle (tiles loaded), run now; otherwise wait
-  if (map.loaded()) {
-    doAnalysis();
-  } else {
-    map.once('idle', doAnalysis);
-  }
+  // Always wait for idle so the new location's tiles are fully rendered
+  // before queryRenderedFeatures runs the shadow analysis
+  map.once('idle', doAnalysis);
 }
 
 // ── Locate button (iOS-safe: synchronous inside direct click handler) ──────
@@ -603,6 +600,8 @@ function initSearch() {
             updateOpenAreaBrightness(new Date(), r.lat);
             loadUV(r.lat, r.lon);
             currentLat = r.lat; currentLon = r.lon;
+            clearParks();
+            loadParks(r.lat, r.lon);
           }
         });
         results.appendChild(item);
