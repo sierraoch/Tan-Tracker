@@ -68,23 +68,48 @@ async function afterLogin(name) {
   }
 }
 
-// Fresh GPS every time map is opened — no cached fallback
-export function requestLocation() {
-  return new Promise(resolve => {
-    if (!navigator.geolocation) {
-      resolve({ lat: userLat ?? 40.758, lon: userLon ?? -73.985, denied: true });
-      return;
-    }
-    navigator.geolocation.getCurrentPosition(
-      pos => {
-        userLat = pos.coords.latitude;
-        userLon = pos.coords.longitude;
-        resolve({ lat: userLat, lon: userLon, denied: false });
-      },
-      () => resolve({ lat: userLat ?? 40.758, lon: userLon ?? -73.985, denied: true }),
-      { timeout: 8000, maximumAge: 0 }
-    );
-  });
+// Last known coords saved to localStorage so we always have a starting point
+const LAST_LOC_KEY = 'tan_last_location';
+
+function getSavedLocation() {
+  try {
+    const s = localStorage.getItem(LAST_LOC_KEY);
+    return s ? JSON.parse(s) : null;
+  } catch { return null; }
+}
+
+function saveLocation(lat, lon) {
+  localStorage.setItem(LAST_LOC_KEY, JSON.stringify({ lat, lon }));
+}
+
+// Start GPS watching — map shows immediately, flies to real loc when ready
+let gpsWatcher = null;
+
+function startGPS() {
+  if (!navigator.geolocation) return;
+  if (gpsWatcher !== null) navigator.geolocation.clearWatch(gpsWatcher);
+
+  gpsWatcher = navigator.geolocation.watchPosition(
+    pos => {
+      const lat = pos.coords.latitude;
+      const lon = pos.coords.longitude;
+      const isFirstFix = userLat === null;
+      userLat = lat;
+      userLon = lon;
+      saveLocation(lat, lon);
+
+      if (isFirstFix) {
+        // First real GPS fix — fly map there now
+        if (mapInitialized) refreshMapLocation(lat, lon);
+        document.getElementById('location-prompt')?.remove();
+      }
+    },
+    (e) => {
+      // Permission denied — show prompt if we have no location at all
+      if (userLat === null && e.code === 1) showLocationPrompt();
+    },
+    { enableHighAccuracy: true, maximumAge: 30000, timeout: 30000 }
+  );
 }
 
 function showApp() {
@@ -99,7 +124,7 @@ function showApp() {
 
 let mytanInitialized = false;
 
-async function navigateTo(pageName) {
+function navigateTo(pageName) {
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   document.getElementById(`page-${pageName}`).classList.add('active');
   document.querySelectorAll('.nav-btn').forEach(btn => {
@@ -107,19 +132,20 @@ async function navigateTo(pageName) {
   });
 
   if (pageName === 'map') {
-    const loc = await requestLocation();
-
-    if (loc.denied && userLat === null) {
-      showLocationPrompt();
-      return;
-    }
+    // Use last known location (or NYC) to show map immediately
+    const saved = getSavedLocation();
+    const startLat = saved?.lat ?? 40.758;
+    const startLon = saved?.lon ?? -73.985;
 
     if (!mapInitialized) {
       mapInitialized = true;
-      initMapPage(loc.lat, loc.lon, MAPBOX_TOKEN).catch(console.error);
-    } else {
-      refreshMapLocation(loc.lat, loc.lon);
+      initMapPage(startLat, startLon, MAPBOX_TOKEN).catch(console.error);
+    } else if (userLat !== null) {
+      refreshMapLocation(userLat, userLon);
     }
+
+    // Always kick off GPS — will fly to real location when fix arrives
+    startGPS();
   }
 
   if (pageName === 'mytan') {
@@ -151,11 +177,11 @@ function showLocationPrompt() {
   `;
   page.appendChild(prompt);
 
-  document.getElementById('location-allow-btn').addEventListener('click', async () => {
+  document.getElementById('location-allow-btn').addEventListener('click', () => {
     prompt.remove();
-    const loc = await requestLocation();
-    if (!mapInitialized) { mapInitialized = true; initMapPage(loc.lat, loc.lon, MAPBOX_TOKEN); }
-    else refreshMapLocation(loc.lat, loc.lon);
+    startGPS();
+    // Init map at NYC while GPS warms up — watchPosition will fly us there
+    if (!mapInitialized) { mapInitialized = true; initMapPage(40.758, -73.985, MAPBOX_TOKEN); }
   });
 
   document.getElementById('location-skip-btn').addEventListener('click', () => {
