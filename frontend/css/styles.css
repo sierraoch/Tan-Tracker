@@ -813,6 +813,72 @@ input { font-family: inherit; }
 }
 .save-session-btn:active { transform: scale(0.98); }
 
+/* ── Map Pins ───────────────────────────────────────────────────────────── */
+.map-pin {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  cursor: pointer;
+  filter: drop-shadow(0 3px 6px rgba(0,0,0,0.4));
+  transition: transform 0.15s;
+}
+.map-pin:active { transform: scale(0.94); }
+.map-pin-bubble {
+  border-radius: 20px;
+  padding: 6px 10px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 44px;
+  justify-content: center;
+}
+.map-pin-label {
+  font-family: var(--font-sans);
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: white;
+  white-space: nowrap;
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.map-pin-tail {
+  width: 0;
+  height: 0;
+  border-left: 6px solid transparent;
+  border-right: 6px solid transparent;
+  border-top: 8px solid;
+  margin-top: -1px;
+}
+
+/* ── Location denied banner ─────────────────────────────────────────────── */
+.location-banner {
+  position: absolute;
+  bottom: 80px;
+  left: 16px;
+  right: 16px;
+  z-index: 10;
+  background: rgba(255,255,255,0.95);
+  border-radius: 12px;
+  padding: 10px 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 0.8rem;
+  color: var(--text-2);
+  box-shadow: var(--shadow-md);
+}
+.location-banner button {
+  background: var(--amber);
+  color: white;
+  border-radius: 8px;
+  padding: 6px 12px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
 /* ── Mapbox overrides ────────────────────────────────────────────────────── */
 .mapboxgl-ctrl-bottom-right,
 .mapboxgl-ctrl-bottom-left { display: none; }
