@@ -1,4 +1,4 @@
-import { fetchUV, fetchPlaces, geocode } from './api.js';
+import { fetchUV, geocode } from './api.js';
 import { uvDescription } from './tanScore.js';
 
 // ── Sun position ──────────────────────────────────────────────────────────
@@ -16,80 +16,283 @@ function sunPosition(date, lat, lon) {
   const ra = Math.atan2(Math.cos(epsilon) * Math.sin(lambda), Math.cos(lambda));
   const ha = (lmst * 15 - ra / rad) * rad;
   const latRad = lat * rad;
-  const altitude = Math.asin(Math.sin(latRad) * Math.sin(dec) + Math.cos(latRad) * Math.cos(dec) * Math.cos(ha));
-  const azimuth = Math.atan2(-Math.sin(ha), Math.tan(dec) * Math.cos(latRad) - Math.sin(latRad) * Math.cos(ha));
-  return { altitude: altitude / rad, azimuth: ((azimuth / rad + 360) % 360) };
+  const alt = Math.asin(Math.sin(latRad) * Math.sin(dec) + Math.cos(latRad) * Math.cos(dec) * Math.cos(ha));
+  const az = Math.atan2(-Math.sin(ha), Math.tan(dec) * Math.cos(latRad) - Math.sin(latRad) * Math.cos(ha));
+  return { altitude: alt / rad, azimuth: ((az / rad + 360) % 360) };
 }
 
-const CATEGORY_WEIGHT = { park: 3, plaza: 2, outdoor_dining: 1 };
-const CATEGORY_LABEL  = { park: 'Park', plaza: 'Plaza', outdoor_dining: 'Outdoor dining' };
-
 let map = null;
-let placesData = [];
+let currentLat = 40.758;
+let currentLon = -73.985;
 
 export async function initMapPage(lat, lon, mapboxToken) {
+  currentLat = lat;
+  currentLon = lon;
   mapboxgl.accessToken = mapboxToken;
 
   map = new mapboxgl.Map({
     container: 'map-container',
-    style: 'mapbox://styles/mapbox/standard',  // best shadow support
+    style: 'mapbox://styles/mapbox/standard',
     center: [lon, lat],
-    zoom: 15.5,
-    pitch: 55,
-    bearing: -20,
+    zoom: 15,
+    pitch: 52,
+    bearing: -15,
     antialias: true,
   });
 
+  map.addControl(new mapboxgl.NavigationControl({ showCompass: false }), 'top-right');
+
   map.on('style.load', () => {
-    addBuildingsLayer();
-    addUserDot(lat, lon);
+    addBuildingLayer();
+    addOpenAreaOverlay();
     addSkyLayer(new Date(), lat, lon);
     setSunLighting(new Date(), lat, lon);
     loadUV(lat, lon);
-    loadPlaces(lat, lon);
   });
 
   initScrubber(lat, lon);
-
-  document.getElementById('place-card-close').addEventListener('click', () => {
-    document.getElementById('place-card').classList.add('hidden');
-  });
-
   initSearch();
 }
 
+export function refreshMapLocation(lat, lon) {
+  currentLat = lat;
+  currentLon = lon;
+  if (!map) return;
+  map.flyTo({ center: [lon, lat], zoom: 15, duration: 1400, essential: true });
+  if (map.isStyleLoaded()) {
+    setSunLighting(new Date(), lat, lon);
+    updateSkyLayer(new Date(), lat, lon);
+    updateOpenAreaBrightness(new Date(), lat);
+  }
+  loadUV(lat, lon);
+}
+
+// ── 3D buildings with shadow casting ─────────────────────────────────────
+function addBuildingLayer() {
+  const labelLayer = map.getStyle().layers.find(
+    l => l.type === 'symbol' && l.layout?.['text-field']
+  )?.id;
+
+  map.addLayer({
+    id: '3d-buildings',
+    source: 'composite',
+    'source-layer': 'building',
+    filter: ['==', 'extrude', 'true'],
+    type: 'fill-extrusion',
+    minzoom: 14,
+    paint: {
+      'fill-extrusion-color': ['interpolate', ['linear'], ['get', 'height'],
+        0, '#1C160F', 50, '#28200F', 200, '#342A14'],
+      'fill-extrusion-height': ['get', 'height'],
+      'fill-extrusion-base': ['get', 'min_height'],
+      'fill-extrusion-opacity': 0.95,
+      'fill-extrusion-cast-shadows': true,
+    },
+  }, labelLayer);
+}
+
+// ── Open area sunny overlay (parks, grass, plazas, open ground) ───────────
+function addOpenAreaOverlay() {
+  // Glow layer under open areas — indicates sunlit ground
+  map.addLayer({
+    id: 'sunny-glow',
+    type: 'fill',
+    source: 'composite',
+    'source-layer': 'landuse',
+    filter: ['in', ['get', 'class'],
+      ['literal', ['park', 'grass', 'pitch', 'cemetery', 'golf_course', 'scrub', 'sand']]],
+    paint: {
+      'fill-color': '#F5C250',
+      'fill-opacity': 0,   // set dynamically by sun altitude
+    },
+  }, '3d-buildings');
+
+  // Subtle border around open areas
+  map.addLayer({
+    id: 'sunny-border',
+    type: 'line',
+    source: 'composite',
+    'source-layer': 'landuse',
+    filter: ['in', ['get', 'class'],
+      ['literal', ['park', 'grass', 'pitch', 'cemetery', 'golf_course']]],
+    paint: {
+      'line-color': '#E8A84A',
+      'line-width': 1.5,
+      'line-opacity': 0,   // set dynamically
+      'line-blur': 2,
+    },
+  }, '3d-buildings');
+
+  updateOpenAreaBrightness(new Date(), currentLat);
+}
+
+function updateOpenAreaBrightness(date, lat) {
+  if (!map?.getLayer('sunny-glow')) return;
+  const { altitude } = sunPosition(date.getTime(), lat, currentLon);
+  const intensity = Math.max(0, Math.min(1, altitude / 45));
+  map.setPaintProperty('sunny-glow',   'fill-opacity',  intensity * 0.32);
+  map.setPaintProperty('sunny-border', 'line-opacity',  intensity * 0.55);
+}
+
+// ── Sky + atmosphere ──────────────────────────────────────────────────────
+function addSkyLayer(date, lat, lon) {
+  const { altitude, azimuth } = sunPosition(date.getTime(), lat, lon);
+  map.addLayer({
+    id: 'sky',
+    type: 'sky',
+    paint: {
+      'sky-type': 'atmosphere',
+      'sky-atmosphere-sun': [azimuth, 90 - Math.max(0, altitude)],
+      'sky-atmosphere-sun-intensity': 12,
+      'sky-atmosphere-color': 'rgba(255,220,110,1)',
+    },
+  });
+}
+
+function updateSkyLayer(date, lat, lon) {
+  if (!map?.getLayer('sky')) return;
+  const { altitude, azimuth } = sunPosition(date.getTime(), lat, lon);
+  map.setPaintProperty('sky', 'sky-atmosphere-sun', [azimuth, 90 - Math.max(0, altitude)]);
+}
+
+// ── Sun lighting (directional shadows) ───────────────────────────────────
+function setSunLighting(date, lat, lon) {
+  if (!map) return;
+  const { altitude, azimuth } = sunPosition(date.getTime(), lat, lon);
+  const up = altitude > 0;
+  const intensity = Math.max(0, Math.min(1, altitude / 55));
+  const r = 255;
+  const g = Math.round(210 + intensity * 40);
+  const b = Math.round(120 + intensity * 80);
+
+  try {
+    map.setLights([
+      {
+        id: 'sun', type: 'directional',
+        properties: {
+          color: up ? `rgb(${r},${g},${b})` : 'rgb(80,100,160)',
+          intensity: up ? Math.max(0.15, intensity) : 0.05,
+          direction: [azimuth, Math.max(1, altitude)],
+          'cast-shadows': true,
+          'shadow-intensity': up ? Math.min(1.0, intensity * 1.1) : 0,
+        },
+      },
+      {
+        id: 'ambient', type: 'ambient',
+        properties: { color: 'rgb(155,175,210)', intensity: 0.38 + (1 - intensity) * 0.3 },
+      },
+    ]);
+  } catch {
+    map.setLight({
+      position: [1.5, azimuth, 90 - Math.max(0, altitude)],
+      color: `rgb(${r},${g},${b})`,
+      intensity: Math.max(0.4, intensity),
+      anchor: 'map',
+    });
+  }
+}
+
+// ── Time scrubber ─────────────────────────────────────────────────────────
+function initScrubber(lat, lon) {
+  const input = document.getElementById('scrubber-input');
+  const label = document.getElementById('scrubber-time-label');
+  const now   = new Date();
+  const mins  = now.getHours() * 60 + now.getMinutes();
+  input.value = mins;
+  label.textContent = formatTime(mins);
+
+  input.addEventListener('input', () => {
+    const m = parseInt(input.value);
+    const d = new Date(); d.setHours(Math.floor(m / 60), m % 60, 0, 0);
+    label.textContent = formatTime(m);
+    setSunLighting(d, lat, lon);
+    updateSkyLayer(d, lat, lon);
+    updateOpenAreaBrightness(d, lat);
+  });
+}
+
+function formatTime(totalMinutes) {
+  const h = Math.floor(totalMinutes / 60) % 24;
+  const m = totalMinutes % 60;
+  return `${h % 12 || 12}:${m.toString().padStart(2, '0')} ${h < 12 ? 'AM' : 'PM'}`;
+}
+
+// ── UV ────────────────────────────────────────────────────────────────────
+async function loadUV(lat, lon) {
+  const badge   = document.getElementById('uv-badge');
+  const valueEl = document.getElementById('uv-value');
+  const labelEl = document.getElementById('uv-label');
+  try {
+    const data = await fetchUV(lat, lon);
+    const uv = data.uvIndex ?? 0;
+    const { level, text } = uvDescription(uv);
+    valueEl.textContent = `UV ${uv.toFixed(1)}`;
+    labelEl.textContent = text;
+    badge.setAttribute('data-level', level);
+    window.__currentUV__ = uv;
+  } catch {
+    valueEl.textContent = 'UV --';
+    labelEl.textContent = 'Unavailable';
+  }
+}
+
 // ── City / zip search ─────────────────────────────────────────────────────
+const SAVED_LOC_KEY = 'tan_saved_location';
+
+export function getSavedLocation() {
+  try { return JSON.parse(localStorage.getItem(SAVED_LOC_KEY)); } catch { return null; }
+}
+
+// Called by GPS callback in app.js — saves coords without overwriting a manually searched name
+export function saveGPSLocation(lat, lon) {
+  const existing = getSavedLocation();
+  // Only auto-save GPS if user hasn't manually picked a city
+  if (!existing?.isManual) {
+    localStorage.setItem(SAVED_LOC_KEY, JSON.stringify({ name: 'Current Location', lat, lon, isManual: false }));
+    updateLocationPill('Current Location');
+  }
+}
+
+function saveLocation(name, lat, lon) {
+  localStorage.setItem(SAVED_LOC_KEY, JSON.stringify({ name, lat, lon, isManual: true }));
+  updateLocationPill(name);
+}
+
+function updateLocationPill(name) {
+  const pill = document.getElementById('location-pill-name');
+  if (pill) pill.textContent = name;
+}
+
 function initSearch() {
   const input   = document.getElementById('map-search-input');
   const results = document.getElementById('map-search-results');
   const clear   = document.getElementById('map-search-clear');
   let debounce  = null;
 
+  // Show saved location name in pill
+  const saved = getSavedLocation();
+  if (saved) updateLocationPill(saved.name);
+
   input.addEventListener('input', () => {
     const q = input.value.trim();
     clear.classList.toggle('hidden', !q);
     clearTimeout(debounce);
-    if (q.length < 2) { results.classList.add('hidden'); results.innerHTML = ''; return; }
+    if (q.length < 2) { results.classList.add('hidden'); return; }
     debounce = setTimeout(() => doSearch(q), 350);
   });
 
   input.addEventListener('keydown', e => {
-    if (e.key === 'Escape') {
-      input.value = ''; results.classList.add('hidden'); clear.classList.add('hidden');
-    }
+    if (e.key === 'Escape') { input.value = ''; results.classList.add('hidden'); clear.classList.add('hidden'); }
   });
 
   clear.addEventListener('click', () => {
-    input.value = '';
-    results.classList.add('hidden');
-    results.innerHTML = '';
-    clear.classList.add('hidden');
-    input.focus();
+    input.value = ''; results.classList.add('hidden'); results.innerHTML = '';
+    clear.classList.add('hidden'); input.focus();
   });
 
-  document.getElementById('map-container').addEventListener('click', () => {
+  document.getElementById('map-container')?.addEventListener('touchstart', () => {
     results.classList.add('hidden');
-  });
+  }, { passive: true });
 
   async function doSearch(q) {
     try {
@@ -105,13 +308,16 @@ function initSearch() {
         item.className = 'search-result-item';
         item.textContent = r.name;
         item.addEventListener('click', () => {
-          input.value = '';
-          clear.classList.add('hidden');
-          results.classList.add('hidden');
+          input.value = ''; clear.classList.add('hidden');
+          results.classList.add('hidden'); results.innerHTML = '';
+          saveLocation(r.name, r.lat, r.lon);
           if (map) {
-            map.flyTo({ center: [r.lon, r.lat], zoom: 14, pitch: 55, duration: 1600, essential: true });
+            map.flyTo({ center: [r.lon, r.lat], zoom: 15, pitch: 52, duration: 1600, essential: true });
+            setSunLighting(new Date(), r.lat, r.lon);
+            updateSkyLayer(new Date(), r.lat, r.lon);
+            updateOpenAreaBrightness(new Date(), r.lat);
             loadUV(r.lat, r.lon);
-            loadPlaces(r.lat, r.lon);
+            currentLat = r.lat; currentLon = r.lon;
           }
         });
         results.appendChild(item);
@@ -121,267 +327,5 @@ function initSearch() {
       results.innerHTML = `<div class="search-result-item search-no-results">Search unavailable</div>`;
       results.classList.remove('hidden');
     }
-  }
-}
-
-export function refreshMapLocation(lat, lon) {
-  if (!map) return;
-  map.flyTo({ center: [lon, lat], duration: 1400, essential: true });
-  if (map.getSource('user-location')) {
-    map.getSource('user-location').setData({
-      type: 'Feature', geometry: { type: 'Point', coordinates: [lon, lat] }
-    });
-  }
-  loadUV(lat, lon);
-  loadPlaces(lat, lon);
-}
-
-// ── Buildings with shadow casting ─────────────────────────────────────────
-function addBuildingsLayer() {
-  map.addLayer({
-    id: '3d-buildings',
-    source: 'composite',
-    'source-layer': 'building',
-    filter: ['==', 'extrude', 'true'],
-    type: 'fill-extrusion',
-    minzoom: 14,
-    paint: {
-      'fill-extrusion-color': [
-        'interpolate', ['linear'], ['get', 'height'],
-        0,   '#2A2118',
-        50,  '#352A1E',
-        200, '#3E3025',
-      ],
-      'fill-extrusion-height': ['get', 'height'],
-      'fill-extrusion-base': ['get', 'min_height'],
-      'fill-extrusion-opacity': 0.95,
-      'fill-extrusion-cast-shadows': true,  // key: enables building shadows
-    },
-  });
-}
-
-// ── Sky layer (shows sun disc + atmosphere) ───────────────────────────────
-function addSkyLayer(date, lat, lon) {
-  const { altitude, azimuth } = sunPosition(date.getTime(), lat, lon);
-  if (map.getLayer('sky')) map.removeLayer('sky');
-  map.addLayer({
-    id: 'sky',
-    type: 'sky',
-    paint: {
-      'sky-type': 'atmosphere',
-      'sky-atmosphere-sun': [azimuth, 90 - Math.max(0, altitude)],
-      'sky-atmosphere-sun-intensity': 12,
-      'sky-atmosphere-color': 'rgba(255, 225, 120, 1)',
-      'sky-atmosphere-halo-color': 'rgba(255, 200, 80, 0.6)',
-    },
-  });
-}
-
-// ── Directional sun lighting ──────────────────────────────────────────────
-function setSunLighting(date, lat, lon) {
-  if (!map) return;
-  const { altitude, azimuth } = sunPosition(date.getTime(), lat, lon);
-  const sunUp = altitude > 0;
-  const intensity = Math.max(0, Math.min(1, altitude / 55));
-
-  // Warm golden sun color
-  const r = 255;
-  const g = Math.round(210 + intensity * 40);
-  const b = Math.round(120 + intensity * 80);
-
-  try {
-    map.setLights([
-      {
-        id: 'sun',
-        type: 'directional',
-        properties: {
-          color: sunUp ? `rgb(${r},${g},${b})` : 'rgb(100,120,180)',
-          intensity: sunUp ? Math.max(0.15, intensity) : 0.1,
-          direction: [azimuth, Math.max(1, altitude)],
-          'cast-shadows': true,
-          'shadow-intensity': sunUp ? Math.min(1.0, intensity * 1.1) : 0,
-        },
-      },
-      {
-        id: 'ambient',
-        type: 'ambient',
-        properties: {
-          color: 'rgb(160, 180, 210)',
-          intensity: 0.4 + (1 - intensity) * 0.3,
-        },
-      },
-    ]);
-  } catch {
-    // Fallback for older Mapbox builds
-    map.setLight({
-      position: [1.5, azimuth, 90 - Math.max(0, altitude)],
-      color: `rgb(${r},${g},${b})`,
-      intensity: Math.max(0.4, intensity),
-      anchor: 'map',
-    });
-  }
-}
-
-// ── User location dot ─────────────────────────────────────────────────────
-function addUserDot(lat, lon) {
-  map.addSource('user-location', {
-    type: 'geojson',
-    data: { type: 'Feature', geometry: { type: 'Point', coordinates: [lon, lat] } },
-  });
-  map.addLayer({
-    id: 'user-glow',
-    type: 'circle',
-    source: 'user-location',
-    paint: { 'circle-radius': 22, 'circle-color': '#D4833A', 'circle-opacity': 0.18, 'circle-blur': 0.6 },
-  });
-  map.addLayer({
-    id: 'user-dot',
-    type: 'circle',
-    source: 'user-location',
-    paint: {
-      'circle-radius': 8,
-      'circle-color': '#D4833A',
-      'circle-stroke-width': 3,
-      'circle-stroke-color': '#FFFFFF',
-    },
-  });
-}
-
-// ── Place heat bubbles (GeoJSON layers — no HTML markers) ─────────────────
-function renderPlaceBubbles(places) {
-  // Remove old layers/source
-  ['places-glow', 'places-core'].forEach(id => { if (map.getLayer(id)) map.removeLayer(id); });
-  if (map.getSource('places')) map.removeSource('places');
-
-  if (!places.length) return;
-
-  placesData = places;
-
-  const features = places
-    .filter(p => p.coordinates)
-    .map(p => ({
-      type: 'Feature',
-      geometry: { type: 'Point', coordinates: p.coordinates },
-      properties: {
-        name: p.name,
-        category: p.category,
-        distance: p.distance,
-        weight: CATEGORY_WEIGHT[p.category] ?? 1,
-      },
-    }));
-
-  map.addSource('places', { type: 'geojson', data: { type: 'FeatureCollection', features } });
-
-  // Outer glow — heat map feel
-  map.addLayer({
-    id: 'places-glow',
-    type: 'circle',
-    source: 'places',
-    paint: {
-      'circle-radius': ['interpolate', ['linear'], ['get', 'weight'], 1, 28, 3, 48],
-      'circle-color': '#E8A84A',
-      'circle-opacity': 0.18,
-      'circle-blur': 0.8,
-    },
-  });
-
-  // Core dot
-  map.addLayer({
-    id: 'places-core',
-    type: 'circle',
-    source: 'places',
-    paint: {
-      'circle-radius': ['interpolate', ['linear'], ['get', 'weight'], 1, 9, 3, 14],
-      'circle-color': [
-        'match', ['get', 'category'],
-        'park',           '#3A9E5A',
-        'outdoor_dining', '#7B5EA7',
-        '#E8A84A',
-      ],
-      'circle-opacity': 0.92,
-      'circle-stroke-width': 2.5,
-      'circle-stroke-color': 'rgba(255,255,255,0.9)',
-    },
-  });
-
-  // Click / tap on bubble
-  const handleClick = (e) => {
-    if (!e.features?.length) return;
-    const props = e.features[0].properties;
-    const info = { label: CATEGORY_LABEL[props.category] ?? 'Outdoor spot' };
-    document.getElementById('place-card-type').textContent = info.label;
-    document.getElementById('place-card-name').textContent = props.name;
-    document.getElementById('place-card-distance').textContent =
-      props.distance ? `${Math.round(props.distance)}m away` : 'Nearby';
-    document.getElementById('place-card').classList.remove('hidden');
-  };
-
-  map.on('click', 'places-core', handleClick);
-  map.on('touchend', 'places-core', handleClick);
-  map.on('mouseenter', 'places-core', () => { map.getCanvas().style.cursor = 'pointer'; });
-  map.on('mouseleave', 'places-core', () => { map.getCanvas().style.cursor = ''; });
-}
-
-// ── Scrubber ──────────────────────────────────────────────────────────────
-function initScrubber(lat, lon) {
-  const input = document.getElementById('scrubber-input');
-  const label = document.getElementById('scrubber-time-label');
-  const now   = new Date();
-  const mins  = now.getHours() * 60 + now.getMinutes();
-  input.value = mins;
-  label.textContent = formatTime(mins);
-
-  input.addEventListener('input', () => {
-    const m = parseInt(input.value);
-    const d = new Date(); d.setHours(Math.floor(m / 60), m % 60, 0, 0);
-    label.textContent = formatTime(m);
-    setSunLighting(d, lat, lon);
-    if (map.getLayer('sky')) {
-      map.setPaintProperty('sky', 'sky-atmosphere-sun',
-        (() => { const s = sunPosition(d.getTime(), lat, lon); return [s.azimuth, 90 - Math.max(0, s.altitude)]; })()
-      );
-    }
-  });
-}
-
-function formatTime(totalMinutes) {
-  const h = Math.floor(totalMinutes / 60) % 24;
-  const m = totalMinutes % 60;
-  return `${h % 12 || 12}:${m.toString().padStart(2, '0')} ${h < 12 ? 'AM' : 'PM'}`;
-}
-
-// ── UV ────────────────────────────────────────────────────────────────────
-async function loadUV(lat, lon) {
-  const badge = document.getElementById('uv-badge');
-  const valueEl = document.getElementById('uv-value');
-  const labelEl = document.getElementById('uv-label');
-  try {
-    const data = await fetchUV(lat, lon);
-    const uv = data.uvIndex ?? 0;
-    const { level, text } = uvDescription(uv);
-    valueEl.textContent = `UV ${uv.toFixed(1)}`;
-    labelEl.textContent = text;
-    badge.setAttribute('data-level', level);
-    window.__currentUV__ = uv;
-  } catch {
-    valueEl.textContent = 'UV --';
-    labelEl.textContent = 'Tap to retry';
-  }
-}
-
-// ── Places ────────────────────────────────────────────────────────────────
-async function loadPlaces(lat, lon) {
-  const spotsEl = document.getElementById('spots-count');
-  try {
-    const data = await fetchPlaces(lat, lon);
-    const places = data.places ?? [];
-    spotsEl.textContent = places.length;
-    if (map.isStyleLoaded()) {
-      renderPlaceBubbles(places);
-    } else {
-      map.once('style.load', () => renderPlaceBubbles(places));
-    }
-  } catch {
-    spotsEl.textContent = '0';
   }
 }
