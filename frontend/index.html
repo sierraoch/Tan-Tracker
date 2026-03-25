@@ -26,6 +26,9 @@
 </head>
 <body>
 
+  <!-- ── Login Screen ──────────────────────────────────────────────── -->
+  <div id="login-screen"></div>
+
   <!-- ── Loading Screen ─────────────────────────────────────────────── -->
   <div id="loading" class="loading-screen">
     <div class="loading-content">
@@ -55,6 +58,20 @@
 
     <!-- Map Page -->
     <div id="page-map" class="page page-map active">
+      <!-- Location search -->
+      <div class="map-search-bar" id="map-search-bar">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+          <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+        </svg>
+        <input type="text" id="map-search-input" placeholder="Search city or zip code" autocomplete="off">
+        <button id="map-search-clear" class="hidden" aria-label="Clear">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+          </svg>
+        </button>
+      </div>
+      <div class="map-search-results hidden" id="map-search-results"></div>
+
       <!-- UV Badge -->
       <div class="uv-badge" id="uv-badge">
         <span class="uv-value" id="uv-value">--</span>

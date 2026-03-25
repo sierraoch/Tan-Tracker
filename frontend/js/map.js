@@ -1,4 +1,4 @@
-import { fetchUV, fetchPlaces } from './api.js';
+import { fetchUV, fetchPlaces, geocode } from './api.js';
 import { uvDescription } from './tanScore.js';
 
 // ── Sun position ──────────────────────────────────────────────────────────
@@ -54,6 +54,74 @@ export async function initMapPage(lat, lon, mapboxToken) {
   document.getElementById('place-card-close').addEventListener('click', () => {
     document.getElementById('place-card').classList.add('hidden');
   });
+
+  initSearch();
+}
+
+// ── City / zip search ─────────────────────────────────────────────────────
+function initSearch() {
+  const input   = document.getElementById('map-search-input');
+  const results = document.getElementById('map-search-results');
+  const clear   = document.getElementById('map-search-clear');
+  let debounce  = null;
+
+  input.addEventListener('input', () => {
+    const q = input.value.trim();
+    clear.classList.toggle('hidden', !q);
+    clearTimeout(debounce);
+    if (q.length < 2) { results.classList.add('hidden'); results.innerHTML = ''; return; }
+    debounce = setTimeout(() => doSearch(q), 350);
+  });
+
+  input.addEventListener('keydown', e => {
+    if (e.key === 'Escape') {
+      input.value = ''; results.classList.add('hidden'); clear.classList.add('hidden');
+    }
+  });
+
+  clear.addEventListener('click', () => {
+    input.value = '';
+    results.classList.add('hidden');
+    results.innerHTML = '';
+    clear.classList.add('hidden');
+    input.focus();
+  });
+
+  document.getElementById('map-container').addEventListener('click', () => {
+    results.classList.add('hidden');
+  });
+
+  async function doSearch(q) {
+    try {
+      const data = await geocode(q);
+      results.innerHTML = '';
+      if (!data.results?.length) {
+        results.innerHTML = `<div class="search-result-item search-no-results">No results found</div>`;
+        results.classList.remove('hidden');
+        return;
+      }
+      data.results.forEach(r => {
+        const item = document.createElement('button');
+        item.className = 'search-result-item';
+        item.textContent = r.name;
+        item.addEventListener('click', () => {
+          input.value = '';
+          clear.classList.add('hidden');
+          results.classList.add('hidden');
+          if (map) {
+            map.flyTo({ center: [r.lon, r.lat], zoom: 14, pitch: 55, duration: 1600, essential: true });
+            loadUV(r.lat, r.lon);
+            loadPlaces(r.lat, r.lon);
+          }
+        });
+        results.appendChild(item);
+      });
+      results.classList.remove('hidden');
+    } catch {
+      results.innerHTML = `<div class="search-result-item search-no-results">Search unavailable</div>`;
+      results.classList.remove('hidden');
+    }
+  }
 }
 
 export function refreshMapLocation(lat, lon) {

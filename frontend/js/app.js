@@ -1,4 +1,5 @@
-import { getProfile, fetchConfig } from './api.js';
+import { getProfile, fetchConfig, setCurrentUser } from './api.js';
+import { showLoginScreen, getSavedUser, saveUser, clearUser } from './login.js';
 import { startOnboarding } from './onboarding.js';
 import { initMapPage, refreshMapLocation } from './map.js';
 import { initMyTanPage } from './mytan.js';
@@ -17,11 +18,34 @@ async function boot() {
   const configResult = await fetchConfig().catch(() => null);
   MAPBOX_TOKEN = configResult?.mapboxToken ?? '';
 
+  const savedUser = getSavedUser();
+
+  // Show login screen — always, so the user can switch accounts
+  showLoginScreen(
+    document.getElementById('login-screen'),
+    savedUser,
+    (name) => afterLogin(name)
+  );
+}
+
+async function afterLogin(name) {
+  // Guest mode — no KV, just local
+  if (name === 'guest') {
+    setCurrentUser(null);
+    profile = null;
+    showApp();
+    return;
+  }
+
+  setCurrentUser(name);
+
+  // Check for existing profile in KV
   let existingProfile = null;
   try {
     existingProfile = await getProfile();
   } catch {
-    const local = localStorage.getItem('tan_profile');
+    // KV unavailable — try localStorage fallback
+    const local = localStorage.getItem(`tan_profile_${name}`);
     if (local) existingProfile = JSON.parse(local);
   }
 
@@ -30,6 +54,7 @@ async function boot() {
   setTimeout(() => loading.classList.add('hidden'), 400);
 
   if (!existingProfile?.fitzpatrickType) {
+    // New user — run onboarding
     startOnboarding(document.getElementById('onboarding'), (newProfile) => {
       profile = newProfile;
       showApp();
@@ -40,11 +65,11 @@ async function boot() {
   }
 }
 
-// Explicit location request — called fresh each time map is shown
+// Fresh GPS every time map is opened — no cached fallback
 export function requestLocation() {
   return new Promise(resolve => {
     if (!navigator.geolocation) {
-      resolve({ lat: 40.758, lon: -73.985, denied: true });
+      resolve({ lat: userLat ?? 40.758, lon: userLon ?? -73.985, denied: true });
       return;
     }
     navigator.geolocation.getCurrentPosition(
@@ -60,8 +85,10 @@ export function requestLocation() {
 }
 
 function showApp() {
+  document.getElementById('loading').classList.add('hidden');
   document.getElementById('app').classList.remove('hidden');
   navigateTo('map');
+
   document.querySelectorAll('.nav-btn').forEach(btn => {
     btn.addEventListener('click', () => navigateTo(btn.dataset.page));
   });
@@ -77,19 +104,16 @@ async function navigateTo(pageName) {
   });
 
   if (pageName === 'map') {
-    // Always request fresh location when opening map
     const loc = await requestLocation();
 
     if (loc.denied && userLat === null) {
-      // First time + denied — show location prompt overlay
       showLocationPrompt();
       return;
     }
 
     if (!mapInitialized) {
       mapInitialized = true;
-      initMapPage(loc.lat, loc.lon, MAPBOX_TOKEN)
-        .catch(e => console.error('Map init failed:', e));
+      initMapPage(loc.lat, loc.lon, MAPBOX_TOKEN).catch(console.error);
     } else {
       refreshMapLocation(loc.lat, loc.lon);
     }
@@ -103,10 +127,9 @@ async function navigateTo(pageName) {
 
 function showLocationPrompt() {
   const page = document.getElementById('page-map');
-  let prompt = document.getElementById('location-prompt');
-  if (prompt) return;
+  if (document.getElementById('location-prompt')) return;
 
-  prompt = document.createElement('div');
+  const prompt = document.createElement('div');
   prompt.id = 'location-prompt';
   prompt.className = 'location-prompt';
   prompt.innerHTML = `
@@ -128,24 +151,15 @@ function showLocationPrompt() {
   document.getElementById('location-allow-btn').addEventListener('click', async () => {
     prompt.remove();
     const loc = await requestLocation();
-    if (!mapInitialized) {
-      mapInitialized = true;
-      initMapPage(loc.lat, loc.lon, MAPBOX_TOKEN);
-    } else {
-      refreshMapLocation(loc.lat, loc.lon);
-    }
+    if (!mapInitialized) { mapInitialized = true; initMapPage(loc.lat, loc.lon, MAPBOX_TOKEN); }
+    else refreshMapLocation(loc.lat, loc.lon);
   });
 
   document.getElementById('location-skip-btn').addEventListener('click', () => {
     prompt.remove();
-    const lat = 40.758, lon = -73.985;
-    userLat = lat; userLon = lon;
-    if (!mapInitialized) {
-      mapInitialized = true;
-      initMapPage(lat, lon, MAPBOX_TOKEN);
-    } else {
-      refreshMapLocation(lat, lon);
-    }
+    userLat = 40.758; userLon = -73.985;
+    if (!mapInitialized) { mapInitialized = true; initMapPage(40.758, -73.985, MAPBOX_TOKEN); }
+    else refreshMapLocation(40.758, -73.985);
   });
 }
 
