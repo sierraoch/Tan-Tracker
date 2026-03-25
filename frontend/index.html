@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#FDFAF4">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="Tan Tracker">
+  <meta name="description" content="Find the best outdoor spots to tan right now">
+  <title>Tan Tracker</title>
+
+  <link rel="manifest" href="/manifest.json">
+  <link rel="apple-touch-icon" href="/icons/icon-192.png">
+
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600&display=swap" rel="stylesheet">
+
+  <!-- Mapbox GL JS -->
+  <link href="https://api.mapbox.com/mapbox-gl-js/v3.3.0/mapbox-gl.css" rel="stylesheet">
+  <script src="https://api.mapbox.com/mapbox-gl-js/v3.3.0/mapbox-gl.js"></script>
+
+  <link rel="stylesheet" href="/css/styles.css">
+</head>
+<body>
+
+  <!-- ── Loading Screen ─────────────────────────────────────────────── -->
+  <div id="loading" class="loading-screen">
+    <div class="loading-content">
+      <div class="loading-sun-icon">
+        <svg viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <circle cx="24" cy="24" r="10" fill="#D4833A"/>
+          <line x1="24" y1="4" x2="24" y2="10" stroke="#D4833A" stroke-width="3" stroke-linecap="round"/>
+          <line x1="24" y1="38" x2="24" y2="44" stroke="#D4833A" stroke-width="3" stroke-linecap="round"/>
+          <line x1="4" y1="24" x2="10" y2="24" stroke="#D4833A" stroke-width="3" stroke-linecap="round"/>
+          <line x1="38" y1="24" x2="44" y2="24" stroke="#D4833A" stroke-width="3" stroke-linecap="round"/>
+          <line x1="8.69" y1="8.69" x2="13.03" y2="13.03" stroke="#D4833A" stroke-width="3" stroke-linecap="round"/>
+          <line x1="34.97" y1="34.97" x2="39.31" y2="39.31" stroke="#D4833A" stroke-width="3" stroke-linecap="round"/>
+          <line x1="39.31" y1="8.69" x2="34.97" y2="13.03" stroke="#D4833A" stroke-width="3" stroke-linecap="round"/>
+          <line x1="13.03" y1="34.97" x2="8.69" y2="39.31" stroke="#D4833A" stroke-width="3" stroke-linecap="round"/>
+        </svg>
+      </div>
+      <h1 class="loading-title">Tan Tracker</h1>
+      <p class="loading-subtitle">Finding your light...</p>
+    </div>
+  </div>
+
+  <!-- ── Onboarding ─────────────────────────────────────────────────── -->
+  <div id="onboarding" class="hidden"></div>
+
+  <!-- ── Main App ───────────────────────────────────────────────────── -->
+  <div id="app" class="hidden">
+
+    <!-- Map Page -->
+    <div id="page-map" class="page page-map active">
+      <!-- UV Badge -->
+      <div class="uv-badge" id="uv-badge">
+        <span class="uv-value" id="uv-value">--</span>
+        <span class="uv-label" id="uv-label">UV Index</span>
+      </div>
+
+      <!-- Spots count -->
+      <div class="spots-pill" id="spots-pill">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/>
+        </svg>
+        <span id="spots-count">--</span> spots
+      </div>
+
+      <!-- Map container -->
+      <div id="map-container"></div>
+
+      <!-- Place info card (shown on marker tap) -->
+      <div class="place-card hidden" id="place-card">
+        <div class="place-card-inner">
+          <span class="place-card-type" id="place-card-type"></span>
+          <h3 class="place-card-name" id="place-card-name"></h3>
+          <p class="place-card-distance" id="place-card-distance"></p>
+          <button class="place-card-close" id="place-card-close" aria-label="Close">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+              <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      <!-- Time Scrubber -->
+      <div class="time-scrubber" id="time-scrubber">
+        <div class="scrubber-row">
+          <span class="scrubber-time" id="scrubber-time-label">Now</span>
+          <input type="range" class="scrubber-input" id="scrubber-input" min="0" max="1440" step="5">
+          <span class="scrubber-end">11 PM</span>
+        </div>
+        <div class="scrubber-sun-path" id="scrubber-sun-path"></div>
+      </div>
+    </div>
+
+    <!-- My Tan Page -->
+    <div id="page-mytan" class="page page-mytan">
+      <div class="mytan-scroll">
+        <header class="mytan-header">
+          <p class="mytan-greeting" id="mytan-greeting">Good morning</p>
+          <h1 class="mytan-title">Your Tan Status</h1>
+        </header>
+
+        <!-- Score card -->
+        <div class="score-card">
+          <div class="score-row">
+            <div class="score-number-wrap">
+              <span class="score-number" id="score-number">0</span>
+              <span class="score-max">/100</span>
+            </div>
+            <div class="score-trend" id="score-trend">
+              <!-- trend icon injected by JS -->
+            </div>
+          </div>
+          <div class="progress-bar-wrap">
+            <div class="progress-bar-track">
+              <div class="progress-bar-fill" id="progress-fill"></div>
+              <div class="progress-goal-marker" id="goal-marker"></div>
+            </div>
+            <div class="progress-milestones">
+              <span style="left:0%">Base</span>
+              <span style="left:30%">Noticeable</span>
+              <span style="left:60%">Visibly tan</span>
+              <span style="left:85%">Deep</span>
+            </div>
+          </div>
+          <p class="milestone-label" id="milestone-label">Building a base</p>
+        </div>
+
+        <!-- Stats row -->
+        <div class="stats-row">
+          <div class="stat-card">
+            <span class="stat-value" id="stat-days-since">--</span>
+            <span class="stat-label">days since last session</span>
+          </div>
+          <div class="stat-card">
+            <span class="stat-value" id="stat-decay-days">--</span>
+            <span class="stat-label">days to drop a tier</span>
+          </div>
+        </div>
+
+        <!-- Time needed widget -->
+        <div class="time-needed-card" id="time-needed-card">
+          <div class="time-needed-icon">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="10"/>
+              <polyline points="12 6 12 12 16 14"/>
+            </svg>
+          </div>
+          <div class="time-needed-text">
+            <p class="time-needed-main" id="time-needed-main">Checking UV...</p>
+            <p class="time-needed-sub" id="time-needed-sub"></p>
+          </div>
+        </div>
+
+        <!-- Log session button -->
+        <button class="log-btn" id="log-session-btn">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+          </svg>
+          Log a Session
+        </button>
+
+        <!-- Session history -->
+        <div class="sessions-section">
+          <h2 class="sessions-title">History</h2>
+          <div id="sessions-list" class="sessions-list">
+            <p class="sessions-empty" id="sessions-empty">No sessions logged yet. Get outside!</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Bottom Nav -->
+    <nav class="bottom-nav">
+      <button class="nav-btn active" data-page="map">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+          <polygon points="3,6 9,3 15,6 21,3 21,18 15,21 9,18 3,21"/>
+          <line x1="9" y1="3" x2="9" y2="18"/>
+          <line x1="15" y1="6" x2="15" y2="21"/>
+        </svg>
+        <span>Map</span>
+      </button>
+      <button class="nav-btn" data-page="mytan">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+          <circle cx="12" cy="12" r="5"/>
+          <line x1="12" y1="1" x2="12" y2="3"/>
+          <line x1="12" y1="21" x2="12" y2="23"/>
+          <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/>
+          <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/>
+          <line x1="1" y1="12" x2="3" y2="12"/>
+          <line x1="21" y1="12" x2="23" y2="12"/>
+          <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/>
+          <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
+        </svg>
+        <span>My Tan</span>
+      </button>
+    </nav>
+  </div>
+
+  <!-- ── Log Session Modal ───────────────────────────────────────────── -->
+  <div id="log-modal" class="modal-backdrop hidden">
+    <div class="modal">
+      <div class="modal-header">
+        <h2 class="modal-title">Log a Session</h2>
+        <button class="modal-close" id="modal-close">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+          </svg>
+        </button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label class="form-label">Duration (minutes)</label>
+          <div class="duration-stepper">
+            <button class="stepper-btn" id="duration-minus">−</button>
+            <span class="stepper-value" id="duration-value">30</span>
+            <button class="stepper-btn" id="duration-plus">+</button>
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">SPF Used</label>
+          <div class="spf-options" id="spf-options">
+            <button class="spf-btn" data-spf="none">None</button>
+            <button class="spf-btn active" data-spf="spf15">SPF 15</button>
+            <button class="spf-btn" data-spf="spf30">SPF 30</button>
+            <button class="spf-btn" data-spf="spf50">SPF 50+</button>
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">UV Index (auto)</label>
+          <div class="uv-auto-row">
+            <span class="uv-auto-value" id="modal-uv-value">--</span>
+            <span class="uv-auto-label">current conditions</span>
+          </div>
+        </div>
+      </div>
+      <button class="save-session-btn" id="save-session-btn">Save Session</button>
+    </div>
+  </div>
+
+  <script type="module" src="/js/app.js"></script>
+</body>
+</html>

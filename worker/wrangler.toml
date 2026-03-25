@@ -1,0 +1,12 @@
+name = "tan-tracker-proxy"
+main = "src/index.js"
+compatibility_date = "2024-09-23"
+compatibility_flags = ["nodejs_compat"]
+
+[[kv_namespaces]]
+binding = "TAN_TRACKER_KV"
+id = "2f211cf731824810a33598031711b708"
+
+# Set your Mapbox token as a secret:
+#   cd worker && npx wrangler secret put MAPBOX_TOKEN
+# Then paste your token (starts with pk.eyJ1...)
