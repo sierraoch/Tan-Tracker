@@ -27,7 +27,7 @@ function requestGPS() {
       if (mapInitialized) refreshMapLocation(gpsLat, gpsLon);
     },
     () => { /* GPS denied or unavailable — keep saved/default location */ },
-    { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 }
+    { enableHighAccuracy: false, timeout: 10000, maximumAge: 0 }
   );
 }
 
