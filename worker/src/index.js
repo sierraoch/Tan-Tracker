@@ -63,6 +63,7 @@ export default {
 
         return json({
           uvIndex: uvNow,
+          currentHour,
           isNight,
           tempF,
           weathercode,
@@ -79,19 +80,44 @@ export default {
         if (!lat || !lon) return err('lat and lon required');
         const token = env.MAPBOX_TOKEN;
         if (!token) return err('Mapbox token not configured', 500);
-        const res = await fetch(
-          `https://api.mapbox.com/geocoding/v5/mapbox.places/park.json` +
-          `?proximity=${lon},${lat}&types=poi&limit=10&access_token=${token}`
+
+        const searches = [
+          { q: 'park',               category: 'park'       },
+          { q: 'outdoor+restaurant', category: 'restaurant' },
+          { q: 'plaza',              category: 'plaza'      },
+        ];
+
+        const groups = await Promise.all(
+          searches.map(({ q, category }) =>
+            fetch(
+              `https://api.mapbox.com/geocoding/v5/mapbox.places/${q}.json` +
+              `?proximity=${lon},${lat}&types=poi&limit=8&access_token=${token}`
+            ).then(r => r.json()).then(data =>
+              (data.features ?? []).map(f => ({
+                name: f.place_name,
+                lat:  f.center[1],
+                lon:  f.center[0],
+                category,
+              }))
+            )
+          )
         );
-        const data = await res.json();
-        console.log('[parks] result count:', data.features?.length ?? 0);
-        return json({
-          parks: (data.features ?? []).map(f => ({
-            name: f.place_name,
-            lat: f.center[1],
-            lon: f.center[0],
-          })),
-        });
+
+        // Deduplicate by short name, cap at 15
+        const seen  = new Set();
+        const parks = [];
+        for (const group of groups) {
+          for (const place of group) {
+            const key = place.name.split(',')[0].toLowerCase().trim();
+            if (!seen.has(key) && parks.length < 15) {
+              seen.add(key);
+              parks.push(place);
+            }
+          }
+        }
+
+        console.log('[parks] combined result count:', parks.length);
+        return json({ parks });
       }
 
       // ── Geocode ───────────────────────────────────────────────────────────
