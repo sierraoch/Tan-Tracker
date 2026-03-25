@@ -290,22 +290,29 @@ function updateWeatherBar(data, uv, level, displayText) {
     tempEl.textContent = `${data.tempF}°F`;
   }
 
-  // Mini forecast bars (+1h, +2h, +3h)
-  const maxUV = 12;
+  // Forecast bars — actual clock times with UV number + colored dot
+  const baseHour = data.currentHour ?? new Date().getHours();
   (data.forecast ?? []).forEach((uvH, i) => {
-    const col  = document.getElementById(`bar-f${i + 1}`);
+    const col    = document.getElementById(`bar-f${i + 1}`);
     if (!col) return;
-    const fill = col.querySelector('.forecast-bar-fill');
-    const pct  = Math.min(100, (uvH / maxUV) * 100);
+    const fill   = col.querySelector('.forecast-bar-fill');
+    const uvEl   = document.getElementById(`bar-f${i + 1}-uv`);
+    const timeEl = document.getElementById(`bar-f${i + 1}-time`);
+
+    const h      = (baseHour + i + 1) % 24;
+    const ampm   = h < 12 ? 'am' : 'pm';
+    const h12    = h % 12 || 12;
     const { level: fLevel } = uvDescription(uvH);
-    if (fill) {
-      fill.style.height = `${Math.max(4, pct)}%`;
-      fill.style.background = UV_COLORS[fLevel] ?? 'var(--amber-light)';
-    }
+    const color  = UV_COLORS[fLevel] ?? 'var(--amber-light)';
+    const pct    = Math.min(100, (uvH / 12) * 100);
+
+    if (fill)   { fill.style.height = `${Math.max(4, pct)}%`; fill.style.background = color; }
+    if (uvEl)   { uvEl.textContent = uvH.toFixed(1); uvEl.style.color = color; }
+    if (timeEl) { timeEl.textContent = `${h12}${ampm}`; }
   });
 }
 
-// ── Park bubble markers ───────────────────────────────────────────────────
+// ── Park markers with sun-window analysis ────────────────────────────────
 const parkMarkers = [];
 
 function haversine(lat1, lon1, lat2, lon2) {
@@ -318,34 +325,165 @@ function haversine(lat1, lon1, lat2, lon2) {
   return (R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))).toFixed(1);
 }
 
+// Compass bearing (degrees, north = 0, clockwise) from point 1 → point 2
+function bearing(lat1, lon1, lat2, lon2) {
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const lat1R = lat1 * Math.PI / 180;
+  const lat2R = lat2 * Math.PI / 180;
+  const y = Math.sin(dLon) * Math.cos(lat2R);
+  const x = Math.cos(lat1R) * Math.sin(lat2R) - Math.sin(lat1R) * Math.cos(lat2R) * Math.cos(dLon);
+  return ((Math.atan2(y, x) * 180 / Math.PI) + 360) % 360;
+}
+
+function distMeters(lat1, lon1, lat2, lon2) {
+  const R = 6371000;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a = Math.sin(dLat / 2) ** 2
+    + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180)
+    * Math.sin(dLon / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+// Query rendered 3D buildings near a spot and return simplified objects
+function getNearbyBuildings(spotLat, spotLon) {
+  if (!map || !map.getLayer('3d-buildings')) return [];
+  try {
+    const pt = map.project([spotLon, spotLat]);
+    const features = map.queryRenderedFeatures(
+      [[pt.x - 150, pt.y - 150], [pt.x + 150, pt.y + 150]],
+      { layers: ['3d-buildings'] }
+    );
+    return features.map(f => {
+      const coords = f.geometry.type === 'Polygon'
+        ? f.geometry.coordinates[0]
+        : f.geometry.coordinates[0][0];
+      const lons = coords.map(c => c[0]);
+      const lats = coords.map(c => c[1]);
+      return {
+        lat: (Math.min(...lats) + Math.max(...lats)) / 2,
+        lon: (Math.min(...lons) + Math.max(...lons)) / 2,
+        height: f.properties.height || f.properties.render_height || 10,
+      };
+    });
+  } catch { return []; }
+}
+
+// Returns true if a building casts shadow on the spot at the given sun position
+function isShadowedByBuilding(spotLat, spotLon, bldg, sunAltDeg, sunBearingDeg) {
+  if (sunAltDeg <= 0) return true;
+  const dist = distMeters(spotLat, spotLon, bldg.lat, bldg.lon);
+  if (dist < 2) return false;
+  // Sun is at sunBearingDeg; building must be in that direction to block sun
+  const bldgBearing = bearing(spotLat, spotLon, bldg.lat, bldg.lon);
+  const angDiff = Math.abs(((bldgBearing - sunBearingDeg + 540) % 360) - 180);
+  if (angDiff > 30) return false;
+  // Building tall enough to cast shadow at this sun altitude?
+  return bldg.height > dist * Math.tan(sunAltDeg * Math.PI / 180);
+}
+
+// Analyze how many consecutive hours a spot gets unobstructed sun today (8am-7pm)
+function analyzeSunWindow(spot) {
+  const SunCalc = window.SunCalc;
+  if (!SunCalc) return { sunHours: 99, sunWindow: 'All day' }; // CDN failed → pass through
+
+  const buildings = getNearbyBuildings(spot.lat, spot.lon);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  const sunnyHours = [];
+  for (let h = 8; h <= 19; h++) {
+    const d = new Date(today);
+    d.setHours(h, 0, 0, 0);
+    const pos    = SunCalc.getPosition(d, spot.lat, spot.lon);
+    const altDeg = pos.altitude * 180 / Math.PI;
+    if (altDeg <= 2) continue; // below horizon or nearly so
+
+    // SunCalc azimuth: from south, positive = west. Convert to compass (north = 0).
+    const sunBearing = ((pos.azimuth * 180 / Math.PI) + 180 + 360) % 360;
+    const shadowed = buildings.some(b => isShadowedByBuilding(spot.lat, spot.lon, b, altDeg, sunBearing));
+    if (!shadowed) sunnyHours.push(h);
+  }
+
+  // Longest consecutive block
+  let maxLen = 0, maxStart = -1, curLen = 0, curStart = -1;
+  sunnyHours.forEach((h, i) => {
+    if (i === 0 || h !== sunnyHours[i - 1] + 1) { curLen = 1; curStart = h; }
+    else curLen++;
+    if (curLen > maxLen) { maxLen = curLen; maxStart = curStart; }
+  });
+
+  if (maxLen < 2) return null;
+
+  const fmt = h => `${h % 12 || 12}${h < 12 ? 'am' : 'pm'}`;
+  return { sunHours: maxLen, sunWindow: `${fmt(maxStart)} – ${fmt(maxStart + maxLen)}` };
+}
+
+function addParkMarker(spot, userLat, userLon) {
+  const el = document.createElement('div');
+  const size = spot.sunHours >= 4 ? 'large' : spot.sunHours >= 3 ? 'medium' : 'small';
+  el.className = `park-bubble park-bubble--${size}`;
+
+  const icon  = spot.category === 'park' ? '🌳' : spot.category === 'restaurant' ? '🍽️' : '☀️';
+  const dist  = haversine(userLat, userLon, spot.lat, spot.lon);
+  const name  = spot.name.split(',')[0];
+
+  const popup = new mapboxgl.Popup({ offset: 16, closeButton: false })
+    .setHTML(
+      `<strong>${icon} ${name}</strong>` +
+      `<br><span>☀️ Sunny ${spot.sunWindow}</span>` +
+      `<br><span>${dist} mi away</span>`
+    );
+
+  const marker = new mapboxgl.Marker({ element: el })
+    .setLngLat([spot.lon, spot.lat])
+    .setPopup(popup)
+    .addTo(map);
+
+  el.addEventListener('click', () => marker.togglePopup());
+  parkMarkers.push(marker);
+}
+
 function clearParks() {
   parkMarkers.forEach(m => m.remove());
   parkMarkers.length = 0;
+  const msg = document.getElementById('no-spots-msg');
+  if (msg) msg.classList.add('hidden');
 }
 
 async function loadParks(lat, lon) {
-  try {
-    const data = await fetchParks(lat, lon);
-    console.log('[parks] received', data.parks?.length ?? 0, 'results');
-    (data.parks ?? []).forEach(park => {
-      const el = document.createElement('div');
-      el.className = 'park-bubble';
+  // Wait for map to finish rendering tiles before querying buildings
+  const doAnalysis = async () => {
+    try {
+      const data = await fetchParks(lat, lon);
+      const spots = data.parks ?? [];
+      console.log('[parks] received', spots.length, 'candidates');
 
-      const dist = haversine(lat, lon, park.lat, park.lon);
-      const shortName = park.name.split(',')[0];
-      const popup = new mapboxgl.Popup({ offset: 14, closeButton: false })
-        .setHTML(`<strong>${shortName}</strong><br><span>${dist} mi away</span>`);
+      const passing = [];
+      for (const spot of spots) {
+        const result = analyzeSunWindow(spot);
+        if (result) passing.push({ ...spot, ...result });
+      }
 
-      const marker = new mapboxgl.Marker({ element: el })
-        .setLngLat([park.lon, park.lat])
-        .setPopup(popup)
-        .addTo(map);
+      console.log('[parks]', passing.length, 'passed sun threshold (≥2h consecutive)');
 
-      el.addEventListener('click', () => marker.togglePopup());
-      parkMarkers.push(marker);
-    });
-  } catch (e) {
-    console.error('[parks] error:', e);
+      const msg = document.getElementById('no-spots-msg');
+      if (passing.length === 0) {
+        if (msg) msg.classList.remove('hidden');
+        return;
+      }
+      if (msg) msg.classList.add('hidden');
+      passing.forEach(spot => addParkMarker(spot, lat, lon));
+    } catch (e) {
+      console.error('[parks] error:', e);
+    }
+  };
+
+  // If map is already idle (tiles loaded), run now; otherwise wait
+  if (map.loaded()) {
+    doAnalysis();
+  } else {
+    map.once('idle', doAnalysis);
   }
 }
 

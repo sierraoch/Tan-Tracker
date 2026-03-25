@@ -1142,31 +1142,38 @@ input { font-family: inherit; }
 .bar-wx-icon { font-size: 1.2rem; line-height: 1; }
 .bar-wx-temp { font-size: 0.75rem; color: var(--text-2); font-weight: 500; }
 
-/* Forecast mini bars */
+/* Forecast section */
 .forecast-section {
   display: flex;
-  align-items: flex-end;
-  justify-content: center;
-  gap: 6px;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
   flex: 1;
-  padding: 0 4px;
+  padding: 0 2px;
+}
+.forecast-header {
+  font-size: 0.58rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-3);
+  white-space: nowrap;
+}
+.forecast-cols {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
 }
 .forecast-col {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 3px;
-  width: 22px;
-}
-.forecast-col span {
-  font-size: 0.58rem;
-  color: var(--text-3);
-  font-weight: 500;
-  white-space: nowrap;
+  gap: 2px;
+  width: 24px;
 }
 .forecast-track {
   width: 16px;
-  height: 28px;
+  height: 26px;
   background: var(--cream-3);
   border-radius: 4px;
   display: flex;
@@ -1180,15 +1187,54 @@ input { font-family: inherit; }
   background: var(--amber-light);
   transition: height 0.4s ease, background 0.3s;
 }
+.forecast-uv-val {
+  font-size: 0.62rem;
+  font-weight: 600;
+  color: var(--amber);
+  line-height: 1;
+  transition: color 0.3s;
+}
+.forecast-clock {
+  font-size: 0.58rem;
+  color: var(--text-3);
+  font-weight: 500;
+  white-space: nowrap;
+}
 
 /* ── Park bubble markers ────────────────────────────────────────────────── */
 .park-bubble {
-  width: 20px;
-  height: 20px;
   border-radius: 50%;
   background: #C8822A;
-  box-shadow: 0 0 0 4px rgba(200,130,42,0.25), 0 2px 8px rgba(0,0,0,0.3);
   cursor: pointer;
   transition: transform 0.15s;
 }
-.park-bubble:active { transform: scale(1.2); }
+.park-bubble:active { transform: scale(1.15); }
+
+/* 2h — small, no glow */
+.park-bubble--small  { width: 16px; height: 16px; box-shadow: 0 1px 4px rgba(0,0,0,0.35); }
+/* 3h — medium, soft glow */
+.park-bubble--medium { width: 22px; height: 22px; box-shadow: 0 0 0 5px rgba(200,130,42,0.28), 0 2px 8px rgba(0,0,0,0.3); }
+/* 4h+ — large, strong glow, pulse */
+.park-bubble--large  { width: 28px; height: 28px; box-shadow: 0 0 0 7px rgba(200,130,42,0.35), 0 3px 14px rgba(0,0,0,0.3); animation: park-pulse 2s ease-in-out infinite; }
+@keyframes park-pulse {
+  0%, 100% { box-shadow: 0 0 0 7px rgba(200,130,42,0.35), 0 3px 14px rgba(0,0,0,0.3); }
+  50%       { box-shadow: 0 0 0 13px rgba(200,130,42,0.15), 0 3px 14px rgba(0,0,0,0.3); }
+}
+
+/* ── No sunny spots message ──────────────────────────────────────────────── */
+.no-spots-msg {
+  position: absolute;
+  bottom: 130px;
+  left: 16px;
+  right: 16px;
+  z-index: 10;
+  background: rgba(255,255,255,0.96);
+  backdrop-filter: blur(8px);
+  border-radius: 12px;
+  padding: 13px 16px;
+  text-align: center;
+  font-size: 0.82rem;
+  color: var(--text-2);
+  box-shadow: var(--shadow-sm);
+  line-height: 1.4;
+}
