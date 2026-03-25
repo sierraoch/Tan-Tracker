@@ -33,7 +33,7 @@ export default {
         return json({ mapboxToken: token });
       }
 
-      // ── UV — uses current= so timezone is never an issue ─────────────────
+      // ── UV + Weather ──────────────────────────────────────────────────────
       if (path === '/api/uv') {
         const lat = url.searchParams.get('lat');
         const lon = url.searchParams.get('lon');
@@ -41,17 +41,56 @@ export default {
 
         const res = await fetch(
           `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}` +
-          `&current=uv_index&hourly=uv_index&timezone=auto&forecast_days=1`
+          `&hourly=uv_index,temperature_2m,precipitation_probability,weathercode` +
+          `&current_weather=true&timezone=auto&forecast_days=1`
         );
         const data = await res.json();
+        console.log('[UV] Raw Open-Meteo response:', JSON.stringify(data));
 
-        // current.uv_index is always accurate regardless of server timezone
-        const uvIndex = data?.current?.uv_index ?? 0;
+        // Use the location's UTC offset (not server UTC) for the correct local hour
+        const utcOffsetSecs = data.utc_offset_seconds ?? 0;
+        const localMs = Date.now() + utcOffsetSecs * 1000;
+        const currentHour = Math.floor(localMs / 3600000) % 24;
+
+        const uvNow = data.hourly?.uv_index?.[currentHour] ?? 0;
+        const tempC = data.current_weather?.temperature ?? null;
+        const tempF = tempC !== null ? Math.round(tempC * 9 / 5 + 32) : null;
+        const weathercode = data.current_weather?.weathercode ?? null;
+        const isNight = uvNow === 0 && (currentHour < 6 || currentHour >= 20);
+        const forecast = [1, 2, 3].map(h => data.hourly?.uv_index?.[(currentHour + h) % 24] ?? 0);
+
+        console.log(`[UV] hour=${currentHour} uv=${uvNow} tempF=${tempF} code=${weathercode}`);
 
         return json({
-          uvIndex,
-          all: data?.hourly?.uv_index ?? [],
-          times: data?.hourly?.time ?? [],
+          uvIndex: uvNow,
+          isNight,
+          tempF,
+          weathercode,
+          forecast,
+          all: data.hourly?.uv_index ?? [],
+          times: data.hourly?.time ?? [],
+        });
+      }
+
+      // ── Parks (nearby outdoor spots via Mapbox) ───────────────────────────
+      if (path === '/api/parks') {
+        const lat = url.searchParams.get('lat');
+        const lon = url.searchParams.get('lon');
+        if (!lat || !lon) return err('lat and lon required');
+        const token = env.MAPBOX_TOKEN;
+        if (!token) return err('Mapbox token not configured', 500);
+        const res = await fetch(
+          `https://api.mapbox.com/geocoding/v5/mapbox.places/park.json` +
+          `?proximity=${lon},${lat}&types=poi&limit=10&access_token=${token}`
+        );
+        const data = await res.json();
+        console.log('[parks] result count:', data.features?.length ?? 0);
+        return json({
+          parks: (data.features ?? []).map(f => ({
+            name: f.place_name,
+            lat: f.center[1],
+            lon: f.center[0],
+          })),
         });
       }
 
