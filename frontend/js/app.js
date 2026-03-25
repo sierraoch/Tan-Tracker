@@ -15,12 +15,19 @@ async function boot() {
     navigator.serviceWorker.register('/sw.js').catch(() => {});
   }
 
-  const configResult = await fetchConfig().catch(() => null);
+  // Hide loading screen before showing login
+  const loading = document.getElementById('loading');
+  loading.classList.add('fade-out');
+  setTimeout(() => loading.classList.add('hidden'), 400);
+
+  const configResult = await Promise.race([
+    fetchConfig(),
+    new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 5000)),
+  ]).catch(() => null);
   MAPBOX_TOKEN = configResult?.mapboxToken ?? '';
 
   const savedUser = getSavedUser();
 
-  // Show login screen — always, so the user can switch accounts
   showLoginScreen(
     document.getElementById('login-screen'),
     savedUser,
@@ -48,10 +55,6 @@ async function afterLogin(name) {
     const local = localStorage.getItem(`tan_profile_${name}`);
     if (local) existingProfile = JSON.parse(local);
   }
-
-  const loading = document.getElementById('loading');
-  loading.classList.add('fade-out');
-  setTimeout(() => loading.classList.add('hidden'), 400);
 
   if (!existingProfile?.fitzpatrickType) {
     // New user — run onboarding
