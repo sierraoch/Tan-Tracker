@@ -1,4 +1,4 @@
-const WORKER_URL = window.__WORKER_URL__ || 'https://tan-tracker-proxy.sierrajochoa.workers.dev';
+const WORKER_URL = 'https://tan-tracker-proxy.sierrajochoa.workers.dev';
 
 // Current user — set by login, read by all API calls
 let currentUser = null;
@@ -37,9 +37,9 @@ export function fetchUV(lat, lon) {
   return request(`/api/uv?lat=${lat}&lon=${lon}`);
 }
 
-// ── Places ────────────────────────────────────────────────────────────────
-export function fetchPlaces(lat, lon) {
-  return request(`/api/places?lat=${lat}&lon=${lon}`);
+// ── Parks (nearby outdoor spots) ─────────────────────────────────────────
+export function fetchParks(lat, lon) {
+  return request(`/api/parks?lat=${lat}&lon=${lon}`);
 }
 
 // ── Geocode (city / zip → coordinates) ───────────────────────────────────
