@@ -12,7 +12,6 @@ function json(body, status = 200) {
 }
 function err(msg, status = 400) { return json({ error: msg }, status); }
 
-// KV keys are namespaced per user: user:{name}:profile etc.
 function userKey(user, key) {
   return `user:${user.toLowerCase().trim()}:${key}`;
 }
@@ -34,52 +33,29 @@ export default {
         return json({ mapboxToken: token });
       }
 
-      // ── UV ───────────────────────────────────────────────────────────────
+      // ── UV — uses current= so timezone is never an issue ─────────────────
       if (path === '/api/uv') {
         const lat = url.searchParams.get('lat');
         const lon = url.searchParams.get('lon');
         if (!lat || !lon) return err('lat and lon required');
+
         const res = await fetch(
           `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}` +
-          `&hourly=uv_index&timezone=auto&forecast_days=1`
+          `&current=uv_index&hourly=uv_index&timezone=auto&forecast_days=1`
         );
         const data = await res.json();
-        const hour = new Date().getHours();
+
+        // current.uv_index is always accurate regardless of server timezone
+        const uvIndex = data?.current?.uv_index ?? 0;
+
         return json({
-          uvIndex: data?.hourly?.uv_index?.[hour] ?? 0,
+          uvIndex,
           all: data?.hourly?.uv_index ?? [],
           times: data?.hourly?.time ?? [],
         });
       }
 
-      // ── Places ───────────────────────────────────────────────────────────
-      if (path === '/api/places') {
-        const lat = url.searchParams.get('lat');
-        const lon = url.searchParams.get('lon');
-        if (!lat || !lon) return err('lat and lon required');
-        const token = env.MAPBOX_TOKEN;
-        if (!token) return err('Mapbox token not configured', 500);
-        const results = [];
-        for (const cat of ['park', 'plaza', 'outdoor_dining']) {
-          const res = await fetch(
-            `https://api.mapbox.com/search/searchbox/v1/category/${cat}` +
-            `?proximity=${lon},${lat}&limit=5&access_token=${token}`
-          );
-          if (res.ok) {
-            const data = await res.json();
-            results.push(...(data.features ?? []).map(f => ({
-              id: f.properties?.mapbox_id ?? f.id,
-              name: f.properties?.name ?? 'Unknown',
-              category: cat,
-              coordinates: f.geometry?.coordinates,
-              distance: f.properties?.distance,
-            })));
-          }
-        }
-        return json({ places: results });
-      }
-
-      // ── Geocode (city / zip search) ───────────────────────────────────────
+      // ── Geocode ───────────────────────────────────────────────────────────
       if (path === '/api/geocode') {
         const q = url.searchParams.get('q');
         if (!q) return err('q required');
@@ -90,32 +66,29 @@ export default {
           `?types=place,postcode&country=US&limit=5&access_token=${token}`
         );
         const data = await res.json();
-        const results = (data.features ?? []).map(f => ({
-          name: f.place_name,
-          lat: f.center[1],
-          lon: f.center[0],
-        }));
-        return json({ results });
+        return json({
+          results: (data.features ?? []).map(f => ({
+            name: f.place_name,
+            lat: f.center[1],
+            lon: f.center[0],
+          })),
+        });
       }
 
-      // ── All user-scoped routes require ?user= ─────────────────────────────
+      // ── User-scoped routes ────────────────────────────────────────────────
       const user = url.searchParams.get('user');
       if (!user) return err('user param required', 400);
 
-      // ── Profile ──────────────────────────────────────────────────────────
       if (path === '/api/profile') {
         if (request.method === 'GET') {
-          const profile = await env.TAN_TRACKER_KV.get(userKey(user, 'profile'), 'json');
-          return json(profile ?? null);
+          return json(await env.TAN_TRACKER_KV.get(userKey(user, 'profile'), 'json') ?? null);
         }
         if (request.method === 'PUT') {
-          const body = await request.json();
-          await env.TAN_TRACKER_KV.put(userKey(user, 'profile'), JSON.stringify(body));
+          await env.TAN_TRACKER_KV.put(userKey(user, 'profile'), JSON.stringify(await request.json()));
           return json({ ok: true });
         }
       }
 
-      // ── Sessions ─────────────────────────────────────────────────────────
       if (path === '/api/sessions') {
         if (request.method === 'GET') {
           return json(await env.TAN_TRACKER_KV.get(userKey(user, 'sessions'), 'json') ?? []);
@@ -130,14 +103,12 @@ export default {
         }
       }
 
-      // ── Tan Score ────────────────────────────────────────────────────────
       if (path === '/api/tanscore') {
         if (request.method === 'GET') {
           return json(await env.TAN_TRACKER_KV.get(userKey(user, 'tanscore'), 'json') ?? { score: 0, lastUpdated: null });
         }
         if (request.method === 'PUT') {
-          const body = await request.json();
-          await env.TAN_TRACKER_KV.put(userKey(user, 'tanscore'), JSON.stringify(body));
+          await env.TAN_TRACKER_KV.put(userKey(user, 'tanscore'), JSON.stringify(await request.json()));
           return json({ ok: true });
         }
       }
