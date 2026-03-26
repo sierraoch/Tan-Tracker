@@ -73,54 +73,6 @@ export default {
         });
       }
 
-      // ── Parks (nearby outdoor spots via Mapbox) ───────────────────────────
-      if (path === '/api/parks') {
-        const lat = url.searchParams.get('lat');
-        const lon = url.searchParams.get('lon');
-        if (!lat || !lon) return err('lat and lon required');
-        const token = env.MAPBOX_TOKEN;
-        if (!token) return err('Mapbox token not configured', 500);
-
-        const searches = [
-          { q: 'park',               category: 'park'       },
-          { q: 'outdoor+restaurant', category: 'restaurant' },
-          { q: 'plaza',              category: 'plaza'      },
-          { q: 'beach',              category: 'beach'      },
-        ];
-
-        const groups = await Promise.all(
-          searches.map(({ q, category }) =>
-            fetch(
-              `https://api.mapbox.com/geocoding/v5/mapbox.places/${q}.json` +
-              `?proximity=${lon},${lat}&types=poi&limit=8&access_token=${token}`
-            ).then(r => r.json()).then(data =>
-              (data.features ?? []).map(f => ({
-                name: f.place_name,
-                lat:  f.center[1],
-                lon:  f.center[0],
-                category,
-              }))
-            )
-          )
-        );
-
-        // Deduplicate by short name, cap at 15
-        const seen  = new Set();
-        const parks = [];
-        for (const group of groups) {
-          for (const place of group) {
-            const key = place.name.split(',')[0].toLowerCase().trim();
-            if (!seen.has(key) && parks.length < 15) {
-              seen.add(key);
-              parks.push(place);
-            }
-          }
-        }
-
-        console.log('[parks] combined result count:', parks.length);
-        return json({ parks });
-      }
-
       // ── Geocode ───────────────────────────────────────────────────────────
       if (path === '/api/geocode') {
         const q = url.searchParams.get('q');

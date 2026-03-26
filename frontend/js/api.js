@@ -37,11 +37,6 @@ export function fetchUV(lat, lon) {
   return request(`/api/uv?lat=${lat}&lon=${lon}`);
 }
 
-// ── Parks (nearby outdoor spots) ─────────────────────────────────────────
-export function fetchParks(lat, lon) {
-  return request(`/api/parks?lat=${lat}&lon=${lon}`);
-}
-
 // ── Geocode (city / zip → coordinates) ───────────────────────────────────
 export function geocode(query) {
   return request(`/api/geocode?q=${encodeURIComponent(query)}`);

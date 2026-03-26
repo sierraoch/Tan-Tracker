@@ -295,101 +295,95 @@ input { font-family: inherit; }
   inset: 0;
 }
 
-/* UV Badge */
-.uv-badge {
+/* ── Map Sidebar Pills ───────────────────────────────────────────────────── */
+.map-pills {
   position: absolute;
-  top: 16px;
-  left: 50%;
-  transform: translateX(-50%);
+  left: 16px;
+  top: 50%;
+  transform: translateY(-50%);
   z-index: 10;
-  background: var(--white);
-  border-radius: 50px;
-  padding: 8px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  pointer-events: all;
+}
+.pill {
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  background: rgba(255,255,255,0.72);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid rgba(255,255,255,0.55);
+  box-shadow: 0 2px 14px rgba(0,0,0,0.16);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: transform 0.15s, background 0.15s;
+  gap: 2px;
+  color: var(--text);
+}
+.pill:active { transform: scale(0.92); }
+.pill-icon { font-size: 1.3rem; line-height: 1; }
+.pill-num {
+  font-family: var(--font-serif);
+  font-size: 0.88rem;
+  line-height: 1;
+}
+.pill-label {
+  font-size: 0.52rem;
+  font-weight: 600;
+  color: var(--text-3);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+/* Pill detail panel */
+.pill-detail {
+  position: absolute;
+  left: 80px;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 10;
+  background: rgba(253,250,244,0.82);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  border: 1px solid rgba(255,255,255,0.65);
+  border-radius: 18px;
+  padding: 16px 18px 14px;
+  min-width: 160px;
+  box-shadow: 0 4px 28px rgba(0,0,0,0.14);
+}
+.pill-detail-close {
+  position: absolute;
+  top: 8px;
+  right: 10px;
+  color: var(--text-3);
+  font-size: 0.85rem;
+  padding: 4px;
+  line-height: 1;
+}
+.detail-big {
+  font-family: var(--font-serif);
+  font-size: 1.6rem;
+  line-height: 1;
+}
+.detail-row { margin-bottom: 4px; }
+.detail-sub {
+  font-size: 0.78rem;
+  color: var(--text-2);
+}
+.detail-forecast-row {
   display: flex;
   align-items: center;
   gap: 8px;
-  box-shadow: var(--shadow-md);
-  white-space: nowrap;
+  padding: 4px 0;
 }
-.uv-value {
-  font-family: var(--font-serif);
-  font-size: 1.1rem;
-  font-weight: 400;
-}
-.uv-label {
-  font-size: 0.75rem;
-  color: var(--text-2);
-  font-weight: 500;
-}
-.uv-badge[data-level="low"]    .uv-value { color: var(--uv-green); }
-.uv-badge[data-level="moderate"] .uv-value { color: var(--uv-yellow); }
-.uv-badge[data-level="high"]   .uv-value { color: var(--uv-orange); }
-.uv-badge[data-level="very-high"] .uv-value { color: var(--uv-red); }
-.uv-badge[data-level="extreme"] .uv-value { color: var(--uv-purple); }
-
-/* Spots pill */
-.spots-pill {
-  position: absolute;
-  top: 16px;
-  right: 16px;
-  z-index: 10;
-  background: rgba(255,255,255,0.92);
-  backdrop-filter: blur(8px);
-  border-radius: 50px;
-  padding: 7px 14px;
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  font-size: 0.75rem;
-  font-weight: 600;
-  color: var(--text-2);
-  box-shadow: var(--shadow-sm);
-}
-
-/* Place card */
-.place-card {
-  position: absolute;
-  bottom: 100px;
-  left: 16px;
-  right: 16px;
-  z-index: 10;
-  background: var(--white);
-  border-radius: 16px;
-  box-shadow: var(--shadow-lg);
-  overflow: hidden;
-  animation: slide-up 0.2s ease;
-}
-@keyframes slide-up {
-  from { transform: translateY(10px); opacity: 0; }
-  to   { transform: translateY(0);    opacity: 1; }
-}
-.place-card-inner { padding: 16px 20px; position: relative; }
-.place-card-type {
-  display: inline-block;
-  font-size: 0.7rem;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--amber);
-  margin-bottom: 4px;
-}
-.place-card-name {
-  font-family: var(--font-serif);
-  font-size: 1.1rem;
-  color: var(--text);
-  margin-bottom: 4px;
-}
-.place-card-distance {
-  font-size: 0.8rem;
-  color: var(--text-3);
-}
-.place-card-close {
-  position: absolute;
-  top: 14px;
-  right: 14px;
-  color: var(--text-3);
-  padding: 4px;
-}
+.detail-forecast-time { font-size: 0.75rem; color: var(--text-3); min-width: 32px; }
+.detail-forecast-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.detail-forecast-val { font-size: 0.85rem; font-weight: 600; }
 
 /* Time Scrubber */
 .time-scrubber {
@@ -1068,7 +1062,7 @@ input { font-family: inherit; }
 /* ── Mapbox overrides ────────────────────────────────────────────────────── */
 .mapboxgl-ctrl-bottom-right,
 .mapboxgl-ctrl-bottom-left { display: none; }
-.mapboxgl-ctrl-top-right { top: 70px; right: 16px; }
+.mapboxgl-ctrl-top-right { top: 120px; right: 16px; }
 .mapboxgl-ctrl-group {
   border-radius: 12px !important;
   box-shadow: var(--shadow-sm) !important;
@@ -1096,145 +1090,3 @@ input { font-family: inherit; }
 .locate-btn:active { opacity: 0.6; }
 .locate-btn.locating { opacity: 0.4; animation: pulse-sun 1s infinite; }
 
-/* ── Weather bar ─────────────────────────────────────────────────────────── */
-.weather-bar {
-  position: absolute;
-  top: 116px;
-  left: 16px;
-  right: 16px;
-  z-index: 9;
-  background: rgba(255,255,255,0.96);
-  backdrop-filter: blur(10px);
-  border-radius: 14px;
-  padding: 10px 16px;
-  display: flex;
-  align-items: center;
-  gap: 0;
-  box-shadow: var(--shadow-sm);
-}
-.weather-section {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  flex: 1;
-  gap: 2px;
-}
-.weather-divider {
-  width: 1px;
-  height: 32px;
-  background: var(--border);
-  flex-shrink: 0;
-}
-.bar-uv-num {
-  font-family: var(--font-serif);
-  font-size: 1.2rem;
-  line-height: 1;
-  color: var(--amber);
-}
-.bar-uv-label {
-  font-size: 0.68rem;
-  color: var(--text-3);
-  font-weight: 500;
-  text-align: center;
-  line-height: 1.2;
-}
-.wx-section { gap: 1px; }
-.bar-wx-icon { font-size: 1.2rem; line-height: 1; }
-.bar-wx-temp { font-size: 0.75rem; color: var(--text-2); font-weight: 500; }
-
-/* Forecast section */
-.forecast-section {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 4px;
-  flex: 1;
-  padding: 0 2px;
-}
-.forecast-header {
-  font-size: 0.58rem;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--text-3);
-  white-space: nowrap;
-}
-.forecast-cols {
-  display: flex;
-  align-items: flex-end;
-  gap: 6px;
-}
-.forecast-col {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 2px;
-  width: 24px;
-}
-.forecast-track {
-  width: 16px;
-  height: 26px;
-  background: var(--cream-3);
-  border-radius: 4px;
-  display: flex;
-  align-items: flex-end;
-  overflow: hidden;
-}
-.forecast-bar-fill {
-  width: 100%;
-  min-height: 3px;
-  border-radius: 4px 4px 0 0;
-  background: var(--amber-light);
-  transition: height 0.4s ease, background 0.3s;
-}
-.forecast-uv-val {
-  font-size: 0.62rem;
-  font-weight: 600;
-  color: var(--amber);
-  line-height: 1;
-  transition: color 0.3s;
-}
-.forecast-clock {
-  font-size: 0.58rem;
-  color: var(--text-3);
-  font-weight: 500;
-  white-space: nowrap;
-}
-
-/* ── Park bubble markers ────────────────────────────────────────────────── */
-.park-bubble {
-  border-radius: 50%;
-  background: #C8822A;
-  cursor: pointer;
-  transition: transform 0.15s;
-}
-.park-bubble:active { transform: scale(1.15); }
-
-/* 2h — small, no glow */
-.park-bubble--small  { width: 16px; height: 16px; box-shadow: 0 1px 4px rgba(0,0,0,0.35); }
-/* 3h — medium, soft glow */
-.park-bubble--medium { width: 22px; height: 22px; box-shadow: 0 0 0 5px rgba(200,130,42,0.28), 0 2px 8px rgba(0,0,0,0.3); }
-/* 4h+ — large, strong glow, pulse */
-.park-bubble--large  { width: 28px; height: 28px; box-shadow: 0 0 0 7px rgba(200,130,42,0.35), 0 3px 14px rgba(0,0,0,0.3); animation: park-pulse 2s ease-in-out infinite; }
-@keyframes park-pulse {
-  0%, 100% { box-shadow: 0 0 0 7px rgba(200,130,42,0.35), 0 3px 14px rgba(0,0,0,0.3); }
-  50%       { box-shadow: 0 0 0 13px rgba(200,130,42,0.15), 0 3px 14px rgba(0,0,0,0.3); }
-}
-
-/* ── No sunny spots message ──────────────────────────────────────────────── */
-.no-spots-msg {
-  position: absolute;
-  bottom: 130px;
-  left: 16px;
-  right: 16px;
-  z-index: 10;
-  background: rgba(255,255,255,0.96);
-  backdrop-filter: blur(8px);
-  border-radius: 12px;
-  padding: 13px 16px;
-  text-align: center;
-  font-size: 0.82rem;
-  color: var(--text-2);
-  box-shadow: var(--shadow-sm);
-  line-height: 1.4;
-}

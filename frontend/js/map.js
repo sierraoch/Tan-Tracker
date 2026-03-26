@@ -1,4 +1,4 @@
-import { fetchUV, fetchParks, geocode } from './api.js';
+import { fetchUV, geocode } from './api.js';
 import { uvDescription } from './tanScore.js';
 
 // ── Sun position ──────────────────────────────────────────────────────────
@@ -48,12 +48,12 @@ export async function initMapPage(lat, lon, mapboxToken) {
     addSkyLayer(new Date(), lat, lon);
     setSunLighting(new Date(), lat, lon);
     loadUV(lat, lon);
-    loadParks(lat, lon);
   });
 
   initScrubber(lat, lon);
   initSearch();
   initLocateButton();
+  initPills();
 }
 
 export function refreshMapLocation(lat, lon) {
@@ -67,8 +67,6 @@ export function refreshMapLocation(lat, lon) {
     updateOpenAreaBrightness(new Date(), lat);
   }
   loadUV(lat, lon);
-  clearParks();
-  loadParks(lat, lon);
 }
 
 // ── 3D buildings with shadow casting ─────────────────────────────────────
@@ -95,35 +93,33 @@ function addBuildingLayer() {
   }, labelLayer);
 }
 
-// ── Open area sunny overlay (parks, grass, plazas, open ground) ───────────
+// ── Sun heatmap overlay (open areas glow warm where sun hits) ────────────
 function addOpenAreaOverlay() {
-  // Glow layer under open areas — indicates sunlit ground
   map.addLayer({
     id: 'sunny-glow',
     type: 'fill',
     source: 'composite',
     'source-layer': 'landuse',
     filter: ['in', ['get', 'class'],
-      ['literal', ['park', 'grass', 'pitch', 'cemetery', 'golf_course', 'scrub', 'sand']]],
+      ['literal', ['park', 'grass', 'pitch', 'cemetery', 'golf_course', 'scrub', 'sand', 'meadow', 'farmland']]],
     paint: {
       'fill-color': '#F5C250',
-      'fill-opacity': 0,   // set dynamically by sun altitude
+      'fill-opacity': 0,
     },
   }, '3d-buildings');
 
-  // Subtle border around open areas
   map.addLayer({
     id: 'sunny-border',
     type: 'line',
     source: 'composite',
     'source-layer': 'landuse',
     filter: ['in', ['get', 'class'],
-      ['literal', ['park', 'grass', 'pitch', 'cemetery', 'golf_course']]],
+      ['literal', ['park', 'grass', 'pitch', 'cemetery', 'golf_course', 'sand', 'meadow']]],
     paint: {
-      'line-color': '#E8A84A',
-      'line-width': 1.5,
-      'line-opacity': 0,   // set dynamically
-      'line-blur': 2,
+      'line-color': '#D4833A',
+      'line-width': 2,
+      'line-opacity': 0,
+      'line-blur': 3,
     },
   }, '3d-buildings');
 
@@ -133,9 +129,24 @@ function addOpenAreaOverlay() {
 function updateOpenAreaBrightness(date, lat) {
   if (!map?.getLayer('sunny-glow')) return;
   const { altitude } = sunPosition(date.getTime(), lat, currentLon);
-  const intensity = Math.max(0, Math.min(1, altitude / 45));
-  map.setPaintProperty('sunny-glow',   'fill-opacity',  intensity * 0.32);
-  map.setPaintProperty('sunny-border', 'line-opacity',  intensity * 0.55);
+  const intensity = Math.max(0, Math.min(1, altitude / 50));
+
+  // Color shifts: pale gold at low sun → rich amber at high sun
+  let color, opacity, borderColor;
+  if (altitude <= 0) {
+    color = '#F5E0A0'; opacity = 0; borderColor = '#D4833A';
+  } else if (altitude < 15) {
+    color = '#F5E0A0'; opacity = intensity * 0.6; borderColor = '#D4833A';
+  } else if (altitude < 35) {
+    color = '#F0B840'; opacity = 0.12 + intensity * 0.2; borderColor = '#D07020';
+  } else {
+    color = '#E88830'; opacity = 0.22 + intensity * 0.16; borderColor = '#C85A18';
+  }
+
+  map.setPaintProperty('sunny-glow', 'fill-color', color);
+  map.setPaintProperty('sunny-glow', 'fill-opacity', opacity);
+  map.setPaintProperty('sunny-border', 'line-color', borderColor);
+  map.setPaintProperty('sunny-border', 'line-opacity', Math.min(0.6, intensity * 0.7));
 }
 
 // ── Sky + atmosphere ──────────────────────────────────────────────────────
@@ -221,29 +232,30 @@ function formatTime(totalMinutes) {
   return `${h % 12 || 12}:${m.toString().padStart(2, '0')} ${h < 12 ? 'AM' : 'PM'}`;
 }
 
-// ── UV + Weather bar ──────────────────────────────────────────────────────
+// ── UV + Weather (stored for pill detail panels) ──────────────────────────
+let lastWeatherData = null;
+
 async function loadUV(lat, lon) {
   try {
     const data = await fetchUV(lat, lon);
     const uv = data.uvIndex ?? 0;
     const { level, text } = uvDescription(uv);
     const displayText = data.isNight ? 'Nighttime' : text;
-
-    // Legacy badge (keep in sync)
-    const valueEl = document.getElementById('uv-value');
-    const labelEl = document.getElementById('uv-label');
-    const badge   = document.getElementById('uv-badge');
-    if (valueEl) valueEl.textContent = `UV ${uv.toFixed(1)}`;
-    if (labelEl) labelEl.textContent = displayText;
-    if (badge)   badge.setAttribute('data-level', level);
     window.__currentUV__ = uv;
+    lastWeatherData = { ...data, uv, level, displayText };
 
-    // Weather bar
-    updateWeatherBar(data, uv, level, displayText);
+    // Update pill icons
+    const uvPill = document.getElementById('pill-uv-num');
+    const wxPill = document.getElementById('pill-wx-icon');
+    if (uvPill) {
+      uvPill.textContent = uv === 0 ? '0' : uv.toFixed(0);
+      uvPill.style.color = UV_COLORS[level] ?? 'var(--amber)';
+    }
+    if (wxPill && data.weathercode != null) {
+      wxPill.textContent = wmoToEmoji(data.weathercode);
+    }
   } catch (e) {
     console.error('[UV] fetch error:', e);
-    const el = document.getElementById('bar-uv-num');
-    if (el) el.textContent = '--';
   }
 }
 
@@ -262,7 +274,19 @@ function wmoToEmoji(code) {
   return '🌡️';
 }
 
-// Map UV level name → CSS color var
+function wmoToLabel(code) {
+  if (code === 0) return 'Clear';
+  if ([1, 2, 3].includes(code)) return 'Partly Cloudy';
+  if ([45, 48].includes(code)) return 'Fog';
+  if ([51, 53, 55].includes(code)) return 'Drizzle';
+  if ([61, 63, 65].includes(code)) return 'Rain';
+  if ([71, 73, 75, 77].includes(code)) return 'Snow';
+  if ([80, 81, 82].includes(code)) return 'Showers';
+  if ([85, 86].includes(code)) return 'Snow Showers';
+  if ([95, 96, 99].includes(code)) return 'Thunderstorm';
+  return '';
+}
+
 const UV_COLORS = {
   low:       'var(--uv-green)',
   moderate:  'var(--uv-yellow)',
@@ -271,156 +295,59 @@ const UV_COLORS = {
   extreme:   'var(--uv-purple)',
 };
 
-function updateWeatherBar(data, uv, level, displayText) {
-  const numEl   = document.getElementById('bar-uv-num');
-  const lblEl   = document.getElementById('bar-uv-label');
-  const iconEl  = document.getElementById('bar-wx-icon');
-  const tempEl  = document.getElementById('bar-wx-temp');
+// ── Sidebar pills (tap to expand detail) ──────────────────────────────────
+function initPills() {
+  const detail  = document.getElementById('pill-detail');
+  const content = document.getElementById('pill-detail-content');
+  const close   = document.getElementById('pill-detail-close');
+  if (!detail || !content) return;
 
-  if (numEl) {
-    numEl.textContent = uv === 0 ? '0' : uv.toFixed(1);
-    numEl.style.color = UV_COLORS[level] ?? 'inherit';
-  }
-  if (lblEl) lblEl.textContent = displayText;
+  let activePill = null;
 
-  if (iconEl && data.weathercode != null) {
-    iconEl.textContent = wmoToEmoji(data.weathercode);
-  }
-  if (tempEl && data.tempF != null) {
-    tempEl.textContent = `${data.tempF}°F`;
-  }
+  function showDetail(type) {
+    if (activePill === type) { detail.classList.add('hidden'); activePill = null; return; }
+    activePill = type;
+    const d = lastWeatherData;
 
-  // Forecast bars — actual clock times with UV number + colored dot
-  const baseHour = data.currentHour ?? new Date().getHours();
-  (data.forecast ?? []).forEach((uvH, i) => {
-    const col    = document.getElementById(`bar-f${i + 1}`);
-    if (!col) return;
-    const fill   = col.querySelector('.forecast-bar-fill');
-    const uvEl   = document.getElementById(`bar-f${i + 1}-uv`);
-    const timeEl = document.getElementById(`bar-f${i + 1}-time`);
-
-    const h      = (baseHour + i + 1) % 24;
-    const ampm   = h < 12 ? 'am' : 'pm';
-    const h12    = h % 12 || 12;
-    const { level: fLevel } = uvDescription(uvH);
-    const color  = UV_COLORS[fLevel] ?? 'var(--amber-light)';
-    const pct    = Math.min(100, (uvH / 12) * 100);
-
-    if (fill)   { fill.style.height = `${Math.max(4, pct)}%`; fill.style.background = color; }
-    if (uvEl)   { uvEl.textContent = uvH.toFixed(1); uvEl.style.color = color; }
-    if (timeEl) { timeEl.textContent = `${h12}${ampm}`; }
-  });
-}
-
-// ── Park markers with sun-window analysis ────────────────────────────────
-const parkMarkers = [];
-
-function haversine(lat1, lon1, lat2, lon2) {
-  const R = 3958.8;
-  const dLat = (lat2 - lat1) * Math.PI / 180;
-  const dLon = (lon2 - lon1) * Math.PI / 180;
-  const a = Math.sin(dLat / 2) ** 2
-    + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180)
-    * Math.sin(dLon / 2) ** 2;
-  return (R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))).toFixed(1);
-}
-
-// Analyze consecutive hours of meaningful sun (altitude ≥ 15°) using SunCalc only.
-// No queryRenderedFeatures — building queries had too large a radius and falsely
-// shadowed open areas like beaches by picking up distant PCH / street buildings.
-function analyzeSunWindow(spot) {
-  const SunCalc = window.SunCalc;
-  if (!SunCalc) return { sunHours: 8, sunWindow: 'All day' };
-
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-
-  const sunnyHours = [];
-  for (let h = 7; h <= 19; h++) {
-    const d = new Date(today);
-    d.setHours(h, 0, 0, 0);
-    const pos    = SunCalc.getPosition(d, spot.lat, spot.lon);
-    const altDeg = pos.altitude * 180 / Math.PI;
-    if (altDeg >= 15) sunnyHours.push(h); // 15° = sun high enough for real tanning
-  }
-
-  let maxLen = 0, maxStart = -1, curLen = 0, curStart = -1;
-  sunnyHours.forEach((h, i) => {
-    if (i === 0 || h !== sunnyHours[i - 1] + 1) { curLen = 1; curStart = h; }
-    else curLen++;
-    if (curLen > maxLen) { maxLen = curLen; maxStart = curStart; }
-  });
-
-  if (maxLen < 2) return null;
-
-  const fmt = h => `${h % 12 || 12}${h < 12 ? 'am' : 'pm'}`;
-  return { sunHours: maxLen, sunWindow: `${fmt(maxStart)} – ${fmt(maxStart + maxLen)}` };
-}
-
-function addParkMarker(spot, userLat, userLon) {
-  const el = document.createElement('div');
-  const size = spot.sunHours >= 4 ? 'large' : spot.sunHours >= 3 ? 'medium' : 'small';
-  el.className = `park-bubble park-bubble--${size}`;
-
-  const icon  = spot.category === 'park' ? '🌳'
-              : spot.category === 'restaurant' ? '🍽️'
-              : spot.category === 'beach' ? '🏖️'
-              : '☀️';
-  const dist  = haversine(userLat, userLon, spot.lat, spot.lon);
-  const name  = spot.name.split(',')[0];
-
-  const popup = new mapboxgl.Popup({ offset: 16, closeButton: false })
-    .setHTML(
-      `<strong>${icon} ${name}</strong>` +
-      `<br><span>☀️ Sunny ${spot.sunWindow}</span>` +
-      `<br><span>${dist} mi away</span>`
-    );
-
-  const marker = new mapboxgl.Marker({ element: el })
-    .setLngLat([spot.lon, spot.lat])
-    .setPopup(popup)
-    .addTo(map);
-
-  el.addEventListener('click', () => marker.togglePopup());
-  parkMarkers.push(marker);
-}
-
-function clearParks() {
-  parkMarkers.forEach(m => m.remove());
-  parkMarkers.length = 0;
-  const msg = document.getElementById('no-spots-msg');
-  if (msg) msg.classList.add('hidden');
-}
-
-async function loadParks(lat, lon) {
-  // Wait for map to finish rendering tiles before querying buildings
-  const doAnalysis = async () => {
-    try {
-      const data = await fetchParks(lat, lon);
-      const spots = data.parks ?? [];
-      console.log('[parks] received', spots.length, 'candidates');
-
-      const passing = [];
-      for (const spot of spots) {
-        const result = analyzeSunWindow(spot);
-        if (result) passing.push({ ...spot, ...result });
-      }
-
-      console.log('[parks]', passing.length, 'passed sun threshold (≥2h consecutive)');
-
-      const msg = document.getElementById('no-spots-msg');
-      if (passing.length === 0) {
-        if (msg) msg.classList.remove('hidden');
-        return;
-      }
-      if (msg) msg.classList.add('hidden');
-      passing.forEach(spot => addParkMarker(spot, lat, lon));
-    } catch (e) {
-      console.error('[parks] error:', e);
+    if (type === 'uv') {
+      const uv = d?.uv ?? 0;
+      const { level } = uvDescription(uv);
+      content.innerHTML =
+        `<div class="detail-row"><span class="detail-big" style="color:${UV_COLORS[level] ?? 'var(--amber)'}">UV ${uv.toFixed(1)}</span></div>` +
+        `<div class="detail-sub">${d?.displayText ?? '--'}</div>`;
+    } else if (type === 'wx') {
+      const emoji = d?.weathercode != null ? wmoToEmoji(d.weathercode) : '--';
+      const label = d?.weathercode != null ? wmoToLabel(d.weathercode) : '';
+      const temp  = d?.tempF != null ? `${d.tempF}°F` : '--';
+      content.innerHTML =
+        `<div class="detail-row"><span class="detail-big">${emoji} ${temp}</span></div>` +
+        `<div class="detail-sub">${label}</div>`;
+    } else if (type === 'forecast') {
+      const baseHour = d?.currentHour ?? new Date().getHours();
+      let html = '<div class="detail-sub" style="margin-bottom:6px">UV Forecast</div>';
+      (d?.forecast ?? []).forEach((uvH, i) => {
+        const h = (baseHour + i + 1) % 24;
+        const h12 = h % 12 || 12;
+        const ampm = h < 12 ? 'am' : 'pm';
+        const { level: fLevel } = uvDescription(uvH);
+        const color = UV_COLORS[fLevel] ?? 'var(--amber)';
+        html += `<div class="detail-forecast-row">` +
+          `<span class="detail-forecast-time">${h12}${ampm}</span>` +
+          `<span class="detail-forecast-dot" style="background:${color}"></span>` +
+          `<span class="detail-forecast-val" style="color:${color}">${uvH.toFixed(1)}</span>` +
+          `</div>`;
+      });
+      content.innerHTML = html;
     }
-  };
 
-  doAnalysis(); // no tile dependency — SunCalc runs on coords alone
+    detail.classList.remove('hidden');
+  }
+
+  document.getElementById('pill-uv')?.addEventListener('click', (e) => { e.stopPropagation(); showDetail('uv'); });
+  document.getElementById('pill-wx')?.addEventListener('click', (e) => { e.stopPropagation(); showDetail('wx'); });
+  document.getElementById('pill-forecast')?.addEventListener('click', (e) => { e.stopPropagation(); showDetail('forecast'); });
+  close?.addEventListener('click', () => { detail.classList.add('hidden'); activePill = null; });
+  document.getElementById('map-container')?.addEventListener('click', () => { detail.classList.add('hidden'); activePill = null; });
 }
 
 // ── Locate button (iOS-safe: synchronous inside direct click handler) ──────
@@ -444,8 +371,6 @@ function initLocateButton() {
         currentLat = lat; currentLon = lon;
         if (map) map.flyTo({ center: [lon, lat], zoom: 15, duration: 1200, essential: true });
         loadUV(lat, lon);
-        clearParks();
-        loadParks(lat, lon);
       },
       function(error) {
         console.error('Location error code:', error.code, 'message:', error.message);
@@ -464,24 +389,15 @@ export function getSavedLocation() {
   try { return JSON.parse(localStorage.getItem(SAVED_LOC_KEY)); } catch { return null; }
 }
 
-// Called by GPS callback in app.js — saves coords without overwriting a manually searched name
 export function saveGPSLocation(lat, lon) {
   const existing = getSavedLocation();
-  // Only auto-save GPS if user hasn't manually picked a city
   if (!existing?.isManual) {
     localStorage.setItem(SAVED_LOC_KEY, JSON.stringify({ name: 'Current Location', lat, lon, isManual: false }));
-    updateLocationPill('Current Location');
   }
 }
 
 function saveLocation(name, lat, lon) {
   localStorage.setItem(SAVED_LOC_KEY, JSON.stringify({ name, lat, lon, isManual: true }));
-  updateLocationPill(name);
-}
-
-function updateLocationPill(name) {
-  const pill = document.getElementById('location-pill-name');
-  if (pill) pill.textContent = name;
 }
 
 function initSearch() {
@@ -489,10 +405,6 @@ function initSearch() {
   const results = document.getElementById('map-search-results');
   const clear   = document.getElementById('map-search-clear');
   let debounce  = null;
-
-  // Show saved location name in pill
-  const saved = getSavedLocation();
-  if (saved) updateLocationPill(saved.name);
 
   input.addEventListener('input', () => {
     const q = input.value.trim();
@@ -539,8 +451,6 @@ function initSearch() {
             updateOpenAreaBrightness(new Date(), r.lat);
             loadUV(r.lat, r.lon);
             currentLat = r.lat; currentLon = r.lon;
-            clearParks();
-            loadParks(r.lat, r.lon);
           }
         });
         results.appendChild(item);
