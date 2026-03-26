@@ -94,34 +94,35 @@ function addBuildingLayer() {
 }
 
 // ── Sun heatmap overlay (open areas glow warm where sun hits) ────────────
+const OPEN_AREA_CLASSES = ['park', 'grass', 'pitch', 'cemetery', 'golf_course', 'scrub', 'sand', 'meadow', 'farmland'];
+const BORDER_CLASSES    = ['park', 'grass', 'pitch', 'cemetery', 'golf_course', 'sand', 'meadow'];
+
 function addOpenAreaOverlay() {
-  map.addLayer({
+  const glowDef = {
     id: 'sunny-glow',
     type: 'fill',
     source: 'composite',
     'source-layer': 'landuse',
-    filter: ['in', ['get', 'class'],
-      ['literal', ['park', 'grass', 'pitch', 'cemetery', 'golf_course', 'scrub', 'sand', 'meadow', 'farmland']]],
-    paint: {
-      'fill-color': '#F5C250',
-      'fill-opacity': 0,
-    },
-  }, '3d-buildings');
-
-  map.addLayer({
+    filter: ['match', ['get', 'class'], OPEN_AREA_CLASSES, true, false],
+    paint: { 'fill-color': '#F5C250', 'fill-opacity': 0 },
+  };
+  const borderDef = {
     id: 'sunny-border',
     type: 'line',
     source: 'composite',
     'source-layer': 'landuse',
-    filter: ['in', ['get', 'class'],
-      ['literal', ['park', 'grass', 'pitch', 'cemetery', 'golf_course', 'sand', 'meadow']]],
-    paint: {
-      'line-color': '#D4833A',
-      'line-width': 2,
-      'line-opacity': 0,
-      'line-blur': 3,
-    },
-  }, '3d-buildings');
+    filter: ['match', ['get', 'class'], BORDER_CLASSES, true, false],
+    paint: { 'line-color': '#D4833A', 'line-width': 2, 'line-opacity': 0, 'line-blur': 3 },
+  };
+
+  try {
+    map.addLayer(glowDef, '3d-buildings');
+    map.addLayer(borderDef, '3d-buildings');
+  } catch {
+    // '3d-buildings' may not exist yet — add without beforeId
+    if (!map.getLayer('sunny-glow'))  map.addLayer(glowDef);
+    if (!map.getLayer('sunny-border')) map.addLayer(borderDef);
+  }
 
   updateOpenAreaBrightness(new Date(), currentLat);
 }
@@ -131,22 +132,28 @@ function updateOpenAreaBrightness(date, lat) {
   const { altitude } = sunPosition(date.getTime(), lat, currentLon);
   const intensity = Math.max(0, Math.min(1, altitude / 50));
 
-  // Color shifts: pale gold at low sun → rich amber at high sun
-  let color, opacity, borderColor;
+  let color, opacity, borderOpacity;
   if (altitude <= 0) {
-    color = '#F5E0A0'; opacity = 0; borderColor = '#D4833A';
+    color = '#F5E0A0'; opacity = 0; borderOpacity = 0;
   } else if (altitude < 15) {
-    color = '#F5E0A0'; opacity = intensity * 0.6; borderColor = '#D4833A';
+    color = '#F5E0A0';
+    opacity = 0.08 + intensity * 0.45;
+    borderOpacity = 0.3;
   } else if (altitude < 35) {
-    color = '#F0B840'; opacity = 0.12 + intensity * 0.2; borderColor = '#D07020';
+    color = '#F0B840';
+    opacity = 0.18 + intensity * 0.2;
+    borderOpacity = 0.5;
   } else {
-    color = '#E88830'; opacity = 0.22 + intensity * 0.16; borderColor = '#C85A18';
+    color = '#E88830';
+    opacity = 0.28 + intensity * 0.14;
+    borderOpacity = 0.65;
   }
 
+  const borderColor = altitude < 15 ? '#D4833A' : altitude < 35 ? '#D07020' : '#C85A18';
   map.setPaintProperty('sunny-glow', 'fill-color', color);
   map.setPaintProperty('sunny-glow', 'fill-opacity', opacity);
   map.setPaintProperty('sunny-border', 'line-color', borderColor);
-  map.setPaintProperty('sunny-border', 'line-opacity', Math.min(0.6, intensity * 0.7));
+  map.setPaintProperty('sunny-border', 'line-opacity', borderOpacity);
 }
 
 // ── Sky + atmosphere ──────────────────────────────────────────────────────
