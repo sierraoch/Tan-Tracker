@@ -24,6 +24,12 @@ function sunPosition(date, lat, lon) {
 let map = null;
 let currentLat = 40.758;
 let currentLon = -73.985;
+const sunMarkers = []; // amber bubble markers for top spots
+
+const OPEN_AREA_CLASSES = [
+  'park', 'grass', 'pitch', 'cemetery', 'golf_course',
+  'scrub', 'sand', 'meadow', 'farmland',
+];
 
 export async function initMapPage(lat, lon, mapboxToken) {
   currentLat = lat;
@@ -44,10 +50,12 @@ export async function initMapPage(lat, lon, mapboxToken) {
 
   map.on('style.load', () => {
     addBuildingLayer();
-    addOpenAreaOverlay();
+    addHeatmapLayers();
     addSkyLayer(new Date(), lat, lon);
     setSunLighting(new Date(), lat, lon);
     loadUV(lat, lon);
+    // Run analysis once tiles are loaded
+    map.once('idle', runSunScoreAnalysis);
   });
 
   initScrubber(lat, lon);
@@ -64,7 +72,7 @@ export function refreshMapLocation(lat, lon) {
   if (map.isStyleLoaded()) {
     setSunLighting(new Date(), lat, lon);
     updateSkyLayer(new Date(), lat, lon);
-    updateOpenAreaBrightness(new Date(), lat);
+    map.once('idle', runSunScoreAnalysis);
   }
   loadUV(lat, lon);
 }
@@ -93,67 +101,220 @@ function addBuildingLayer() {
   }, labelLayer);
 }
 
-// ── Sun heatmap overlay (open areas glow warm where sun hits) ────────────
-const OPEN_AREA_CLASSES = ['park', 'grass', 'pitch', 'cemetery', 'golf_course', 'scrub', 'sand', 'meadow', 'farmland'];
-const BORDER_CLASSES    = ['park', 'grass', 'pitch', 'cemetery', 'golf_course', 'sand', 'meadow'];
+// ── Heatmap layers (GeoJSON source, populated by analysis) ────────────────
+function addHeatmapLayers() {
+  map.addSource('sun-score-source', {
+    type: 'geojson',
+    data: { type: 'FeatureCollection', features: [] },
+  });
 
-function addOpenAreaOverlay() {
-  const glowDef = {
-    id: 'sunny-glow',
+  // Fill: color driven by sunHours property
+  const fillDef = {
+    id: 'sun-score-fill',
     type: 'fill',
-    source: 'composite',
-    'source-layer': 'landuse',
-    filter: ['match', ['get', 'class'], OPEN_AREA_CLASSES, true, false],
-    paint: { 'fill-color': '#F5C250', 'fill-opacity': 0 },
-  };
-  const borderDef = {
-    id: 'sunny-border',
-    type: 'line',
-    source: 'composite',
-    'source-layer': 'landuse',
-    filter: ['match', ['get', 'class'], BORDER_CLASSES, true, false],
-    paint: { 'line-color': '#D4833A', 'line-width': 2, 'line-opacity': 0, 'line-blur': 3 },
+    source: 'sun-score-source',
+    paint: {
+      'fill-color': [
+        'step', ['get', 'sunHours'],
+        '#7BA7BC',    // 0–3h: cool blue-grey
+        4, '#EEC840', // 4–5h: yellow
+        6, '#E07820', // 6–7h: orange
+        8, '#C42C10', // 8+h:  deep amber-red
+      ],
+      'fill-opacity': 0.44,
+    },
   };
 
+  // Border: matching warm/cool tone
+  const borderDef = {
+    id: 'sun-score-border',
+    type: 'line',
+    source: 'sun-score-source',
+    paint: {
+      'line-color': ['case',
+        ['>=', ['get', 'sunHours'], 8], '#9C2208',
+        ['>=', ['get', 'sunHours'], 6], '#B05A0C',
+        ['>=', ['get', 'sunHours'], 4], '#887000',
+        '#506070',
+      ],
+      'line-width': 1.5,
+      'line-opacity': 0.7,
+      'line-blur': 1.5,
+    },
+  };
+
+  // Insert below 3d-buildings so buildings sit on top of the glow
   try {
-    map.addLayer(glowDef, '3d-buildings');
+    map.addLayer(fillDef, '3d-buildings');
     map.addLayer(borderDef, '3d-buildings');
   } catch {
-    // '3d-buildings' may not exist yet — add without beforeId
-    if (!map.getLayer('sunny-glow'))  map.addLayer(glowDef);
-    if (!map.getLayer('sunny-border')) map.addLayer(borderDef);
+    if (!map.getLayer('sun-score-fill'))   map.addLayer(fillDef);
+    if (!map.getLayer('sun-score-border')) map.addLayer(borderDef);
   }
-
-  updateOpenAreaBrightness(new Date(), currentLat);
 }
 
-function updateOpenAreaBrightness(date, lat) {
-  if (!map?.getLayer('sunny-glow')) return;
-  const { altitude } = sunPosition(date.getTime(), lat, currentLon);
-  const intensity = Math.max(0, Math.min(1, altitude / 50));
+// ── Shadow / sun analysis ─────────────────────────────────────────────────
 
-  let color, opacity, borderOpacity;
-  if (altitude <= 0) {
-    color = '#F5E0A0'; opacity = 0; borderOpacity = 0;
-  } else if (altitude < 15) {
-    color = '#F5E0A0';
-    opacity = 0.08 + intensity * 0.45;
-    borderOpacity = 0.3;
-  } else if (altitude < 35) {
-    color = '#F0B840';
-    opacity = 0.18 + intensity * 0.2;
-    borderOpacity = 0.5;
-  } else {
-    color = '#E88830';
-    opacity = 0.28 + intensity * 0.14;
-    borderOpacity = 0.65;
+function getPolygonCentroid(geometry) {
+  let coords;
+  if      (geometry.type === 'Polygon')      coords = geometry.coordinates[0];
+  else if (geometry.type === 'MultiPolygon') coords = geometry.coordinates[0]?.[0];
+  else if (geometry.type === 'Point')        return { lon: geometry.coordinates[0], lat: geometry.coordinates[1] };
+  else return null;
+  if (!coords?.length) return null;
+  let lon = 0, lat = 0;
+  for (const [x, y] of coords) { lon += x; lat += y; }
+  return { lon: lon / coords.length, lat: lat / coords.length };
+}
+
+function haversineMeters(lat1, lon1, lat2, lon2) {
+  const R = 6371000, rad = Math.PI / 180;
+  const dLat = (lat2 - lat1) * rad, dLon = (lon2 - lon1) * rad;
+  const a = Math.sin(dLat / 2) ** 2 +
+    Math.cos(lat1 * rad) * Math.cos(lat2 * rad) * Math.sin(dLon / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function getBearing(lat1, lon1, lat2, lon2) {
+  const rad = Math.PI / 180, dLon = (lon2 - lon1) * rad;
+  const y = Math.sin(dLon) * Math.cos(lat2 * rad);
+  const x = Math.cos(lat1 * rad) * Math.sin(lat2 * rad) -
+            Math.sin(lat1 * rad) * Math.cos(lat2 * rad) * Math.cos(dLon);
+  return ((Math.atan2(y, x) / rad) + 360) % 360;
+}
+
+function angleDiff(a, b) {
+  const d = ((a - b + 360) % 360);
+  return d > 180 ? 360 - d : d;
+}
+
+/**
+ * Count hours (8am–6pm local) where the sun is unblocked at this point.
+ * Uses longitude-based UTC offset to avoid browser-timezone bias.
+ */
+function countSunnyHours(lat, lon, buildings) {
+  // Approximate local UTC offset from longitude (avoids browser TZ issues)
+  const utcOffsetMs = Math.round(lon / 15) * 3_600_000;
+
+  // Today's local midnight as a UTC timestamp
+  const locationNow = new Date(Date.now() + utcOffsetMs);
+  const localMidnightUTC =
+    Date.UTC(locationNow.getUTCFullYear(), locationNow.getUTCMonth(), locationNow.getUTCDate())
+    - utcOffsetMs;
+
+  let sunny = 0;
+
+  for (let h = 8; h <= 18; h++) {
+    const ts = localMidnightUTC + h * 3_600_000;
+    const { altitude, azimuth } = sunPosition(ts, lat, lon);
+
+    if (altitude <= 5) continue; // below horizon or too low
+
+    // Check if any nearby building blocks the sun at this hour
+    let blocked = false;
+    for (const b of buildings) {
+      const bh = b.properties?.height || b.properties?.render_height || 0;
+      if (bh < 5) continue;
+
+      const bc = getPolygonCentroid(b.geometry);
+      if (!bc) continue;
+
+      const dist = haversineMeters(lat, lon, bc.lat, bc.lon);
+      if (dist < 4 || dist > 350) continue; // ignore overlap/far
+
+      // Is the building in the sun's direction from our point?
+      const bear = getBearing(lat, lon, bc.lat, bc.lon);
+      if (angleDiff(bear, azimuth) > 55) continue;
+
+      // Does its angular height exceed sun altitude?
+      const angularHeight = Math.atan2(bh, dist) / (Math.PI / 180);
+      if (angularHeight > altitude) { blocked = true; break; }
+    }
+
+    if (!blocked) sunny++;
   }
 
-  const borderColor = altitude < 15 ? '#D4833A' : altitude < 35 ? '#D07020' : '#C85A18';
-  map.setPaintProperty('sunny-glow', 'fill-color', color);
-  map.setPaintProperty('sunny-glow', 'fill-opacity', opacity);
-  map.setPaintProperty('sunny-border', 'line-color', borderColor);
-  map.setPaintProperty('sunny-border', 'line-opacity', borderOpacity);
+  return sunny;
+}
+
+function runSunScoreAnalysis() {
+  if (!map?.getSource('sun-score-source')) return;
+
+  // Query landuse polygons visible in the current viewport
+  let openAreas = [];
+  try {
+    openAreas = map.querySourceFeatures('composite', {
+      sourceLayer: 'landuse',
+      filter: ['match', ['get', 'class'], OPEN_AREA_CLASSES, true, false],
+    });
+  } catch { return; }
+
+  if (!openAreas.length) return;
+
+  // Deduplicate features split across tile boundaries
+  const seen = [];
+  const deduped = [];
+  for (const f of openAreas) {
+    const center = getPolygonCentroid(f.geometry);
+    if (!center) continue;
+    if (seen.some(s => haversineMeters(center.lat, center.lon, s.lat, s.lon) < 25)) continue;
+    seen.push(center);
+    deduped.push({ feature: f, center });
+  }
+
+  const candidates = deduped.slice(0, 30); // cap for performance
+  const scored = [];
+
+  for (const { feature, center } of candidates) {
+    // Query buildings within ~75px (~350m at zoom 15) of this area's center
+    const sp = map.project([center.lon, center.lat]);
+    let buildings = [];
+    try {
+      buildings = map.queryRenderedFeatures(
+        [[sp.x - 75, sp.y - 75], [sp.x + 75, sp.y + 75]],
+        { layers: ['3d-buildings'] }
+      );
+    } catch { /* buildings layer not ready */ }
+
+    const sunHours = countSunnyHours(center.lat, center.lon, buildings);
+
+    scored.push({
+      type: 'Feature',
+      geometry: feature.geometry,
+      properties: { sunHours, centerLon: center.lon, centerLat: center.lat },
+    });
+  }
+
+  map.getSource('sun-score-source')?.setData({
+    type: 'FeatureCollection',
+    features: scored,
+  });
+
+  updateSunMarkers(scored);
+}
+
+function updateSunMarkers(scored) {
+  sunMarkers.forEach(m => m.remove());
+  sunMarkers.length = 0;
+
+  const topSpots = scored
+    .filter(f => f.properties.sunHours >= 6)
+    .sort((a, b) => b.properties.sunHours - a.properties.sunHours)
+    .slice(0, 5);
+
+  for (const spot of topSpots) {
+    const { sunHours, centerLon, centerLat } = spot.properties;
+    const el = document.createElement('div');
+    el.className = 'sun-bubble';
+    el.dataset.tier = sunHours >= 8 ? 'hot' : 'warm';
+    el.textContent = `${sunHours}h`;
+
+    const marker = new mapboxgl.Marker({ element: el, anchor: 'center' })
+      .setLngLat([centerLon, centerLat])
+      .addTo(map);
+
+    sunMarkers.push(marker);
+  }
 }
 
 // ── Sky + atmosphere ──────────────────────────────────────────────────────
@@ -229,7 +390,6 @@ function initScrubber(lat, lon) {
     label.textContent = formatTime(m);
     setSunLighting(d, lat, lon);
     updateSkyLayer(d, lat, lon);
-    updateOpenAreaBrightness(d, lat);
   });
 }
 
@@ -251,7 +411,6 @@ async function loadUV(lat, lon) {
     window.__currentUV__ = uv;
     lastWeatherData = { ...data, uv, level, displayText };
 
-    // Update pill icons
     const uvPill = document.getElementById('pill-uv-num');
     const wxPill = document.getElementById('pill-wx-icon');
     if (uvPill) {
@@ -282,27 +441,27 @@ function wmoToEmoji(code) {
 }
 
 function wmoToLabel(code) {
-  if (code === 0) return 'Clear';
-  if ([1, 2, 3].includes(code)) return 'Partly Cloudy';
-  if ([45, 48].includes(code)) return 'Fog';
-  if ([51, 53, 55].includes(code)) return 'Drizzle';
-  if ([61, 63, 65].includes(code)) return 'Rain';
-  if ([71, 73, 75, 77].includes(code)) return 'Snow';
-  if ([80, 81, 82].includes(code)) return 'Showers';
-  if ([85, 86].includes(code)) return 'Snow Showers';
-  if ([95, 96, 99].includes(code)) return 'Thunderstorm';
+  if (code === 0)                              return 'Clear';
+  if ([1, 2, 3].includes(code))               return 'Partly Cloudy';
+  if ([45, 48].includes(code))                return 'Fog';
+  if ([51, 53, 55].includes(code))            return 'Drizzle';
+  if ([61, 63, 65].includes(code))            return 'Rain';
+  if ([71, 73, 75, 77].includes(code))        return 'Snow';
+  if ([80, 81, 82].includes(code))            return 'Showers';
+  if ([85, 86].includes(code))                return 'Snow Showers';
+  if ([95, 96, 99].includes(code))            return 'Thunderstorm';
   return '';
 }
 
 const UV_COLORS = {
-  low:       'var(--uv-green)',
-  moderate:  'var(--uv-yellow)',
-  high:      'var(--uv-orange)',
+  low:         'var(--uv-green)',
+  moderate:    'var(--uv-yellow)',
+  high:        'var(--uv-orange)',
   'very-high': 'var(--uv-red)',
-  extreme:   'var(--uv-purple)',
+  extreme:     'var(--uv-purple)',
 };
 
-// ── Sidebar pills (tap to expand detail) ──────────────────────────────────
+// ── Sidebar pills ─────────────────────────────────────────────────────────
 function initPills() {
   const detail  = document.getElementById('pill-detail');
   const content = document.getElementById('pill-detail-content');
@@ -350,37 +509,35 @@ function initPills() {
     detail.classList.remove('hidden');
   }
 
-  document.getElementById('pill-uv')?.addEventListener('click', (e) => { e.stopPropagation(); showDetail('uv'); });
-  document.getElementById('pill-wx')?.addEventListener('click', (e) => { e.stopPropagation(); showDetail('wx'); });
-  document.getElementById('pill-forecast')?.addEventListener('click', (e) => { e.stopPropagation(); showDetail('forecast'); });
+  document.getElementById('pill-uv')?.addEventListener('click', e => { e.stopPropagation(); showDetail('uv'); });
+  document.getElementById('pill-wx')?.addEventListener('click', e => { e.stopPropagation(); showDetail('wx'); });
+  document.getElementById('pill-forecast')?.addEventListener('click', e => { e.stopPropagation(); showDetail('forecast'); });
   close?.addEventListener('click', () => { detail.classList.add('hidden'); activePill = null; });
   document.getElementById('map-container')?.addEventListener('click', () => { detail.classList.add('hidden'); activePill = null; });
 }
 
-// ── Locate button (iOS-safe: synchronous inside direct click handler) ──────
+// ── Locate button ─────────────────────────────────────────────────────────
 function initLocateButton() {
   const btn = document.getElementById('locate-btn');
   if (!btn) return;
 
-  btn.addEventListener('click', function() {
-    if (!navigator.geolocation) {
-      alert('Geolocation not supported on this device');
-      return;
-    }
+  btn.addEventListener('click', function () {
+    if (!navigator.geolocation) { alert('Geolocation not supported on this device'); return; }
     btn.classList.add('locating');
     navigator.geolocation.getCurrentPosition(
-      function(position) {
+      function (position) {
         const lat = position.coords.latitude;
         const lon = position.coords.longitude;
-        console.log('Got location:', lat, lon);
         btn.classList.remove('locating');
         saveGPSLocation(lat, lon);
         currentLat = lat; currentLon = lon;
-        if (map) map.flyTo({ center: [lon, lat], zoom: 15, duration: 1200, essential: true });
+        if (map) {
+          map.flyTo({ center: [lon, lat], zoom: 15, duration: 1200, essential: true });
+          map.once('idle', runSunScoreAnalysis);
+        }
         loadUV(lat, lon);
       },
-      function(error) {
-        console.error('Location error code:', error.code, 'message:', error.message);
+      function (error) {
         btn.classList.remove('locating');
         alert('Location error: ' + error.message);
       },
@@ -389,7 +546,7 @@ function initLocateButton() {
   });
 }
 
-// ── City / zip search ─────────────────────────────────────────────────────
+// ── Location helpers ──────────────────────────────────────────────────────
 const SAVED_LOC_KEY = 'tan_saved_location';
 
 export function getSavedLocation() {
@@ -407,6 +564,7 @@ function saveLocation(name, lat, lon) {
   localStorage.setItem(SAVED_LOC_KEY, JSON.stringify({ name, lat, lon, isManual: true }));
 }
 
+// ── Search ────────────────────────────────────────────────────────────────
 function initSearch() {
   const input   = document.getElementById('map-search-input');
   const results = document.getElementById('map-search-results');
@@ -451,13 +609,13 @@ function initSearch() {
           input.value = ''; clear.classList.add('hidden');
           results.classList.add('hidden'); results.innerHTML = '';
           saveLocation(r.name, r.lat, r.lon);
+          currentLat = r.lat; currentLon = r.lon;
           if (map) {
             map.flyTo({ center: [r.lon, r.lat], zoom: 15, pitch: 52, duration: 1600, essential: true });
             setSunLighting(new Date(), r.lat, r.lon);
             updateSkyLayer(new Date(), r.lat, r.lon);
-            updateOpenAreaBrightness(new Date(), r.lat);
             loadUV(r.lat, r.lon);
-            currentLat = r.lat; currentLon = r.lon;
+            map.once('idle', runSunScoreAnalysis);
           }
         });
         results.appendChild(item);

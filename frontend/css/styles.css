@@ -962,6 +962,37 @@ input { font-family: inherit; }
 }
 .save-session-btn:active { transform: scale(0.98); }
 
+/* ── Sun bubble markers ──────────────────────────────────────────────────── */
+.sun-bubble {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-sans);
+  font-size: 0.65rem;
+  font-weight: 700;
+  color: white;
+  cursor: pointer;
+  filter: drop-shadow(0 2px 6px rgba(0,0,0,0.45));
+  transition: transform 0.15s;
+}
+.sun-bubble:active { transform: scale(0.9); }
+.sun-bubble[data-tier="hot"] {
+  background: #C42C10;
+  box-shadow: 0 0 0 6px rgba(196,44,16,0.28);
+  animation: bubble-pulse 2.4s ease-in-out infinite;
+}
+.sun-bubble[data-tier="warm"] {
+  background: #E07820;
+  box-shadow: 0 0 0 5px rgba(224,120,32,0.24);
+}
+@keyframes bubble-pulse {
+  0%, 100% { box-shadow: 0 0 0 6px rgba(196,44,16,0.28); }
+  50%       { box-shadow: 0 0 0 12px rgba(196,44,16,0.1); }
+}
+
 /* ── Map Pins ───────────────────────────────────────────────────────────── */
 .map-pin {
   display: flex;
